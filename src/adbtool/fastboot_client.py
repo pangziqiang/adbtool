@@ -110,6 +110,40 @@ class FastbootClient:
                 result[m.group(1)] = m.group(2).strip()
         return result
 
+
+    def get_partition_list(self, line_cb=None):
+        """Read device partition table. Returns list of partition names."""
+        # Method 1: try 'getvar all' for partition-type entries
+        all_vars = self.getvar_all(line_cb)
+        partitions = set()
+        for key in all_vars:
+            m = re.match(r"partition-type:(.+)", key)
+            if m:
+                partitions.add(m.group(1))
+            m2 = re.match(r"partition-size:(.+)", key)
+            if m2:
+                partitions.add(m2.group(1))
+        if partitions:
+            return sorted(partitions)
+
+        # Method 2: probe common partition names
+        common = [
+            "boot", "system", "vendor", "product", "dtbo", "vbmeta",
+            "recovery", "cache", "userdata", "metadata", "modem",
+            "boot_b", "system_b", "vendor_b", "product_b", "dtbo_b",
+            "vbmeta_b", "modem_b", "super", "init_boot", "init_boot_b",
+            "vbmeta_system", "vbmeta_vendor", "logo", "abl", "xbl",
+            "rpm", "tz", "devcfg", "keymaster", "misc", "persist",
+            "frp", "config", "rawdump", "ddr", "sec",
+        ]
+        for name in common:
+            try:
+                v = self._run(["getvar", f"partition-type:{name}"], check=False, timeout=10)
+                if "OKAY" in v and "empty" not in v.lower():
+                    partitions.add(name)
+            except Exception:
+                pass
+        return sorted(partitions)
     def flash(self, partition: str, img_path: str, line_cb=None) -> None:
         self._run(["flash", partition, img_path], timeout=600, line_cb=line_cb)
 

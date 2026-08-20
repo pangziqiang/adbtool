@@ -1108,7 +1108,7 @@ class FastbootDialog(QDialog):
 
         # Flow guide
         flow_guide = QLabel(
-            "① 进入 Fastboot 模式  →  ② 选择刷机包目录  →  ③ 解析刷机包  →  ④ 执行刷入  →  ⑤ 重启设备",
+            "① 进入 Fastboot  →  ② 选择刷机包或读取分区表  →  ③ 勾选刷入项  →  ④ 执行刷入  →  ⑤ 重启",
             self,
         )
         flow_guide.setStyleSheet(
@@ -1162,6 +1162,44 @@ class FastbootDialog(QDialog):
         grp1.addWidget(self.wipe_combo)
         grp1.addWidget(self.flash_btn)
         lay.addLayout(grp1)
+
+        # -- Visual partition flash browser --
+        grp_pv = QHBoxLayout()
+        self.read_part_btn = QPushButton("读取分区表", self)
+        self.read_part_btn.clicked.connect(self._read_partitions)
+        grp_pv.addWidget(self.read_part_btn)
+        grp_pv.addStretch(1)
+        lay.addLayout(grp_pv)
+
+        self.part_browser = QTableWidget(self)
+        self.part_browser.setColumnCount(4)
+        self.part_browser.setHorizontalHeaderLabels(
+            ["", "分区名", "镜像文件", "选择镜像"]
+        )
+        self.part_browser.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.part_browser.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.part_browser.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self.part_browser.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.part_browser.setMaximumHeight(0)
+        self.part_browser._part_map = {}
+        lay.addWidget(self.part_browser)
+
+        grp_pb = QHBoxLayout()
+        self.part_browser_add = QPushButton("添加选中到刷写列表", self)
+        self.part_browser_add.clicked.connect(self._add_selected_partitions)
+        self.part_browser_add.setVisible(False)
+        grp_pb.addWidget(self.part_browser_add)
+        grp_pb.addStretch(1)
+        self._grp_pb = grp_pb
+        lay.addLayout(grp_pb)
 
         # Partition table
         self.part_table = QTableWidget(self)
@@ -1381,6 +1419,74 @@ class FastbootDialog(QDialog):
             item.setToolTip(path)
         # 替换浏览按钮为可再编辑（保留按钮即可，tooltip 已有路径）
 
+
+
+    # -- Visual partition flash methods --
+    def _read_partitions(self):
+        if not self.fb.device:
+            self.status.setText("请先连接 fastboot 设备")
+            return
+        self.read_part_btn.setEnabled(False)
+        self.status.setText("正在读取分区表...")
+        self._worker = FastbootWorker(
+            lambda cb, ui: self.fb.get_partition_list(line_cb=cb),
+            self,
+        )
+        self._worker.done.connect(self._on_partitions_read)
+        self._worker.fail.connect(self._on_fail)
+        self._worker.start()
+
+    def _on_partitions_read(self, result):
+        partitions = result[0]
+        self.read_part_btn.setEnabled(True)
+        if not partitions:
+            self.status.setText("未读取到分区信息")
+            return
+        self.part_browser.setRowCount(0)
+        self.part_browser._part_map = {}
+        for i, name in enumerate(partitions):
+            row = self.part_browser.rowCount()
+            self.part_browser.insertRow(row)
+            ck = QTableWidgetItem()
+            ck.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            ck.setCheckState(Qt.CheckState.Unchecked)
+            self.part_browser.setItem(row, 0, ck)
+            self.part_browser.setItem(row, 1, QTableWidgetItem(name))
+            self.part_browser.setItem(row, 2, QTableWidgetItem(""))
+            btn = QPushButton("选择…", self)
+            btn.setFixedWidth(70)
+            btn.clicked.connect(lambda _, r=row: self._browse_part_img(r))
+            self.part_browser.setCellWidget(row, 3, btn)
+            self.part_browser._part_map[row] = name
+        self.part_browser.setMaximumHeight(min(300, 60 + len(partitions) * 28))
+        self.part_browser_add.setVisible(True)
+        self.status.setText(f"已读取 {len(partitions)} 个分区，勾选并选择镜像后点「添加选中到刷写列表」")
+
+    def _browse_part_img(self, row):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择镜像", os.path.expanduser("~/Desktop"),
+            "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
+        )
+        if path:
+            self.part_browser.item(row, 2).setText(path)
+
+    def _add_selected_partitions(self):
+        count = 0
+        for row in range(self.part_browser.rowCount()):
+            ck = self.part_browser.item(row, 0)
+            if ck and ck.checkState() == Qt.CheckState.Checked:
+                part = self.part_browser._part_map.get(row, "")
+                img_item = self.part_browser.item(row, 2)
+                img = img_item.text().strip() if img_item else ""
+                if not part:
+                    continue
+                self._insert_part_row(part, img)
+                count += 1
+        self._resize_table_to_rows()
+        if count:
+            self.status.setText(f"已添加 {count} 个分区到刷写列表")
+        else:
+            self.status.setText("请先勾选要刷入的分区")
 
     def _add_img_files(self):
         files, _ = QFileDialog.getOpenFileNames(
