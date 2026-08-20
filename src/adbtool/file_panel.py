@@ -18,7 +18,9 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFileIconProvider,
+    QLineEdit,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -38,7 +40,7 @@ ROLE_IS_DIR = Qt.ItemDataRole.UserRole + 1
 ROLE_PATH = Qt.ItemDataRole.UserRole
 ROLE_SORT = Qt.ItemDataRole.UserRole + 2
 
-MIME_DROP = "application/x-adbpush-drop"
+MIME_DROP = "application/x-adbtool-drop"
 
 
 class DropModel(QStandardItemModel):
@@ -196,7 +198,7 @@ class FilePanel(QWidget):
         self._show_hidden = False
         self._back: list[str] = []
         self._fwd: list[str] = []
-        self._settings = QSettings("adbpush", "adbpush")
+        self._settings = QSettings("adbtool", "adbtool")
         self._key = "local" if is_local else "phone"
 
         self.model = DropModel(self)
@@ -273,24 +275,53 @@ class FilePanel(QWidget):
             lambda *_: self.update_status()
         )
 
+    def set_panel_title(self, title: str):
+        if self._title_label is not None:
+            self._title_label.setText(f"  {title} ")
+        else:
+            self._title_label = QLabel(f"  {title} ", self)
+            self._title_label.setStyleSheet(
+                "background: #2d2d2d; color: #fff; padding: 4px 8px; font-weight: bold;"
+            )
+            self.nav_row.insertWidget(0, self._title_label)
+
     def _build_nav_row(self):
         self.nav_row = QHBoxLayout()
+        self._title_label = None
         self.back_btn = self._icon_btn("◀", "后退", self.go_back)
         self.fwd_btn = self._icon_btn("▶", "前进", self.go_forward)
         self.up_btn = self._icon_btn("▲", "上级目录", self.go_up)
-        self.path_combo = QComboBox(self)
-        self.path_combo.setEditable(True)
-        self.path_combo.setMinimumWidth(200)
-        self.path_combo.lineEdit().returnPressed.connect(self._jump_to_path)
-        self.path_combo.activated.connect(self._jump_to_path)
-        self.refresh_btn = self._icon_btn("⟳", "刷新", self.refresh)
+        if self.is_local:
+            self.path_combo = None
+            self.path_edit = QLineEdit(self)
+            self.path_edit.setMinimumWidth(200)
+            self.path_edit.setPlaceholderText("输入路径或点击选择目录...")
+            self.path_edit.returnPressed.connect(self._jump_to_edit)
+            self.browse_btn = QPushButton("选择目录...", self)
+            self.browse_btn.clicked.connect(self._browse_local_dir)
+        else:
+            self.path_edit = None
+            self.browse_btn = None
+            self.path_combo = QComboBox(self)
+            self.path_combo.setEditable(True)
+            self.path_combo.setMinimumWidth(200)
+            self.path_combo.lineEdit().returnPressed.connect(self._jump_to_path)
+            self.path_combo.activated.connect(self._jump_to_path)
+        self.refresh_btn = self._icon_btn("刷新", "刷新", self._do_refresh)
+        self._refresh_normal_style = ""
+        self._refresh_active_style = "color: #3daee9; font-weight: bold;"
+
         self.hidden_check = QCheckBox("隐藏文件", self)
         self.hidden_check.toggled.connect(self._toggle_hidden)
         self.list_btn = self._icon_btn("列表", "列表视图", self._view_list, checkable=True)
         self.grid_btn = self._icon_btn("宫格", "宫格(图标)视图", self._view_grid, checkable=True)
         for w in (self.back_btn, self.fwd_btn, self.up_btn):
             self.nav_row.addWidget(w)
-        self.nav_row.addWidget(self.path_combo, 1)
+        if self.is_local:
+            self.nav_row.addWidget(self.path_edit, 1)
+            self.nav_row.addWidget(self.browse_btn)
+        else:
+            self.nav_row.addWidget(self.path_combo, 1)
         self.nav_row.addWidget(self.refresh_btn)
         self.nav_row.addWidget(self.list_btn)
         self.nav_row.addWidget(self.grid_btn)
@@ -304,9 +335,8 @@ class FilePanel(QWidget):
         self.copy_btn = self._icon_btn("复制", None, self.copy_selection)
         self.paste_btn = self._icon_btn("粘贴", None, self.paste)
         self.del_btn = self._icon_btn("删除", "删除选中项 (Delete)", self.delete)
-        self.act_refresh_btn = self._icon_btn("⟳", "刷新", self.refresh)
         for w in (self.new_btn, self.rename_btn, self.cut_btn, self.copy_btn,
-                  self.paste_btn, self.del_btn, self.act_refresh_btn):
+                  self.paste_btn, self.del_btn):
             self.action_row.addWidget(w)
         self.action_row.addStretch(1)
         if self.is_local:
@@ -437,21 +467,31 @@ class FilePanel(QWidget):
         if parent != self.current_path:
             self.navigate(parent)
 
+    def _do_refresh(self):
+        self.refresh_btn.setStyleSheet(self._refresh_active_style)
+        self.refresh()
+
     def refresh(self):
         if self.current_path:
             self.navigate(self.current_path, record=False)
+        self.refresh_btn.setStyleSheet(self._refresh_normal_style)
 
     def clear_content(self):
         self.current_path = ""
         self._back.clear()
         self._fwd.clear()
         self.model.removeRows(0, self.model.rowCount())
-        self.path_combo.setEditText("")
+        if self.path_edit:
+            self.path_edit.clear()
+        elif self.path_combo:
+            self.path_combo.setEditText("")
         self._update_nav_btns()
         self.update_status()
 
     def _jump_to_path(self, index=None):
-        if index is not None and isinstance(index, int):
+        if self.path_edit:
+            path = self.path_edit.text().strip()
+        elif index is not None and isinstance(index, int):
             path = self.path_combo.itemText(index)
         else:
             path = self.path_combo.currentText().strip()
@@ -467,6 +507,9 @@ class FilePanel(QWidget):
         self.navigate(path)
 
     def _update_path_combo(self):
+        if self.path_edit:
+            self.path_edit.setText(self.current_path)
+            return
         self.path_combo.blockSignals(True)
         items = [self.path_combo.itemText(i) for i in range(self.path_combo.count())]
         if self.current_path not in items:
@@ -474,7 +517,28 @@ class FilePanel(QWidget):
         self.path_combo.setCurrentText(self.current_path)
         self.path_combo.blockSignals(False)
 
+    def _browse_local_dir(self):
+        start = self.path_edit.text() if self.path_edit else str(Path.home())
+        import os as _os
+        if not _os.path.isdir(start):
+            start = str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, "选择目录", start)
+        if path:
+            self.navigate(path)
+
+    def _jump_to_edit(self):
+        path = self.path_edit.text().strip()
+        if not path:
+            return
+        import os as _os
+        if not _os.path.isdir(path):
+            self.status_message.emit(f"本地路径不存在: {path}")
+            return
+        self.navigate(path)
+
     def _seed_path_combo(self):
+        if self.path_edit:
+            return
         seeds: list[str]
         if self.is_local:
             home = Path.home()
@@ -491,8 +555,8 @@ class FilePanel(QWidget):
             volumes = Path("/Volumes")
             if volumes.exists():
                 seeds += [
-                    str(p) for p in sorted(volumes.iterdir())
-                    if p.is_dir()
+                    str(pp) for pp in sorted(volumes.iterdir())
+                    if pp.is_dir()
                 ]
         else:
             seeds = [

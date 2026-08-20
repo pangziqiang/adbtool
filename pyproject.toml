@@ -3,14 +3,14 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adbpush"
+name = "adbtool"
 version = "0.1.0"
-description = "ADB file manager for Android devices"
+description = "Android ADB 综合工具箱：文件管理、应用管理、投屏、刷机"
 requires-python = ">=3.9"
 dependencies = ["PyQt6>=6.6"]
 
 [project.scripts]
-adbpush = "adbpush.main:main"
+adbtool = "adbtool.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

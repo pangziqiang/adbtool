@@ -58,7 +58,7 @@ def download_adb(progress=None) -> str:
 
 
 def _download(url: str, dest: str) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "adbpush/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "adbtool/0.1"})
     with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as f:
         while True:
             chunk = resp.read(65536)

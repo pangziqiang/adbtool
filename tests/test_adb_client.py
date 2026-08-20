@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from adbpush.adb_client import AdbClient, AdbError
+from adbtool.adb_client import AdbClient, AdbError
 
 FAKE_LS = """total 100
 drwxr-xr-x 1 root root 4096 2026-08-09 19:35 .hidden

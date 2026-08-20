@@ -154,7 +154,7 @@ class PairDialog(QDialog):
 
 
 _CACHE_DIR = os.path.join(
-    os.path.expanduser("~/Library/Application Support"), "adbpush", "pkg_cache"
+    os.path.expanduser("~/Library/Application Support"), "adbtool", "pkg_cache"
 )
 _APK_SIZE_LIMIT = 200 * 1024 * 1024
 
@@ -257,7 +257,7 @@ class EnrichWorker(QThread):
         cdir = self._cache_dir()
         os.makedirs(cdir, exist_ok=True)
         total = len(self.packages)
-        tmpdir = tempfile.mkdtemp(prefix="adbpush_apk_")
+        tmpdir = tempfile.mkdtemp(prefix="adbtool_apk_")
         try:
             nw = min(4, max(1, total))
             done = 0
@@ -1094,7 +1094,7 @@ class FastbootDialog(QDialog):
         self.adb = adb
         self.fb = FastbootClient()
         self.setWindowTitle("Fastboot 刷机")
-        self.resize(820, 600)
+        self.resize(820, 650)
         self._worker: FastbootWorker | None = None
         self._cmds: list[dict] = []
         self.device_codename = ""
@@ -1106,7 +1106,18 @@ class FastbootDialog(QDialog):
 
         lay = QVBoxLayout(self)
 
-        # 设备行
+        # Flow guide
+        flow_guide = QLabel(
+            "① 进入 Fastboot 模式  →  ② 选择刷机包目录  →  ③ 解析刷机包  →  ④ 执行刷入  →  ⑤ 重启设备",
+            self,
+        )
+        flow_guide.setStyleSheet(
+            "color: #999; font-size: 12px; padding: 6px 12px; background: #2b2b2b; border-radius: 4px; margin-bottom: 4px;"
+        )
+        flow_guide.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(flow_guide)
+
+        # Device row
         dev = QHBoxLayout()
         self.serial_label = QLabel("fastboot 设备: 无", self)
         self.dev_state = QLabel("", self)
@@ -1120,12 +1131,12 @@ class FastbootDialog(QDialog):
         dev.addWidget(self.refresh_btn)
         lay.addLayout(dev)
 
-        # 状态信息
+        # Status info
         self.info = QLabel("", self)
         self.info.setWordWrap(True)
         lay.addWidget(self.info)
 
-        # 分区刷区（复选列表）
+        # Partition + flash row
         grp1 = QHBoxLayout()
         self.part_name = QLineEdit(self)
         self.part_name.setPlaceholderText("分区名…")
@@ -1140,7 +1151,6 @@ class FastbootDialog(QDialog):
         self.wipe_combo.setToolTip("清除数据刷机将擦除 userdata 与 metadata，手机数据全部丢失")
         self.flash_btn = QPushButton("执行刷入", self)
         self.flash_btn.clicked.connect(self._flash_checked)
-        grp1.addWidget(QLabel("分区", self))
         grp1.addWidget(self.part_name, 1)
         grp1.addWidget(self.part_add)
         grp1.addWidget(self.part_del)
@@ -1150,6 +1160,7 @@ class FastbootDialog(QDialog):
         grp1.addWidget(self.flash_btn)
         lay.addLayout(grp1)
 
+        # Partition table
         self.part_table = QTableWidget(self)
         self.part_table.setColumnCount(5)
         self.part_table.setHorizontalHeaderLabels(
@@ -1173,7 +1184,7 @@ class FastbootDialog(QDialog):
         self.part_table.setColumnWidth(4, 120)
         lay.addWidget(self.part_table)
 
-        # 刷机包目录区
+        # Package dir row
         grp2b = QHBoxLayout()
         self.pkg_edit = QLineEdit(self)
         self.pkg_edit.setPlaceholderText("选择刷机包目录（含 images/ 和 FlashScript，如 Mio-kitchen 包）…")
@@ -1186,7 +1197,7 @@ class FastbootDialog(QDialog):
         grp2b.addWidget(self.pkg_parse)
         lay.addLayout(grp2b)
 
-        # 重启区
+        # Reboot row
         grp3 = QHBoxLayout()
         self.reboot_combo = QComboBox(self)
         self.reboot_combo.addItems(

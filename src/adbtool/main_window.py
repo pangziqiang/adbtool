@@ -8,9 +8,14 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
@@ -18,7 +23,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSplitter,
     QToolBar,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -170,11 +174,20 @@ class MainWindow(QMainWindow):
         self.phone_panel.setObjectName("phone")
         self.local_panel.setObjectName("local")
 
+        self._build_device_info()
+
         self.splitter = QSplitter(self)
         self.splitter.addWidget(self._wrap_panel("手机", self.phone_panel))
         self.splitter.addWidget(self._wrap_panel("电脑", self.local_panel))
         self.splitter.setSizes([590, 590])
-        self.setCentralWidget(self.splitter)
+
+        central = QWidget(self)
+        central_lay = QVBoxLayout(central)
+        central_lay.setContentsMargins(0, 0, 0, 0)
+        central_lay.setSpacing(0)
+        central_lay.addWidget(self.device_info_frame, 0)
+        central_lay.addWidget(self.splitter, 1)
+        self.setCentralWidget(central)
 
         self.phone_panel.transfer_requested.connect(
             lambda paths, _: self._start_transfer("push", paths, self.phone_panel.get_cwd())
@@ -195,38 +208,116 @@ class MainWindow(QMainWindow):
 
     # ---------- chrome ----------
 
-    def _wrap_panel(self, title: str, panel: FilePanel) -> QWidget:
-        label = QLabel(f"  {title} ", self)
-        label.setStyleSheet(
-            "background: #2d2d2d; color: #fff; padding: 4px 8px; font-weight: bold;"
+    def _build_device_info(self):
+        self.device_info_frame = QFrame(self)
+        self.device_info_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.device_info_frame.setStyleSheet(
+            "QFrame { background: #2b2b2b; border-bottom: 1px solid #444; }"
         )
-        w = QWidget(self)
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(label)
-        lay.addWidget(panel, 1)
-        return w
+        self.device_info_frame.setMaximumHeight(120)
+        self.device_info_labels = {}
+        layout = QHBoxLayout(self.device_info_frame)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(30)
+
+        fields = [
+            ("model", "型号"),
+            ("android_version", "安卓版本"),
+            ("battery", "电池"),
+            ("storage", "存储"),
+            ("resolution", "分辨率"),
+            ("security_patch", "安全补丁"),
+        ]
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        grid.setVerticalSpacing(10)
+        for i, (key, label_text) in enumerate(fields):
+            row, col = divmod(i, 3)
+            lbl = QLabel(f"{label_text}:", self.device_info_frame)
+            lbl.setStyleSheet("color: #999; font-size: 13px;")
+            val = QLabel("--", self.device_info_frame)
+            val.setStyleSheet("color: #ddd; font-size: 13px;")
+            val.setMinimumWidth(140)
+            grid.addWidget(lbl, row, col * 2)
+            grid.addWidget(val, row, col * 2 + 1)
+            self.device_info_labels[key] = val
+        layout.addLayout(grid)
+        layout.addStretch(1)
+
+        no_device = QLabel("未连接设备", self.device_info_frame)
+        no_device.setStyleSheet("color: #666; font-size: 13px;")
+        self.device_info_labels["_no_device"] = no_device
+        layout.addWidget(no_device)
+
+    def _update_device_info(self, info):
+        if not info or not info.serial:
+            self.device_info_frame.setMaximumHeight(40)
+            for k, lbl in self.device_info_labels.items():
+                if k == "_no_device":
+                    lbl.show()
+                else:
+                    lbl.setText("--")
+            return
+        self.device_info_frame.setMaximumHeight(120)
+        self.device_info_labels["_no_device"].hide()
+
+        name = info.market_name or info.model or info.serial
+        if info.code:
+            name += f" ({info.code})"
+        self.device_info_labels["model"].setText(name)
+
+        ver = info.android_version
+        if info.android_sdk:
+            ver += f" (SDK {info.android_sdk})"
+        if info.miui_version:
+            ver += f" | {info.miui_version}"
+        self.device_info_labels["android_version"].setText(ver or "--")
+
+        bat = info.battery_level or "--"
+        if info.battery_status:
+            bat += f" {info.battery_status}"
+        self.device_info_labels["battery"].setText(bat)
+
+        if info.storage_total:
+            if info.storage_free and info.storage_total:
+                self.device_info_labels["storage"].setText(
+                    f"{info.storage_free} 可用 / {info.storage_total}"
+                )
+            else:
+                self.device_info_labels["storage"].setText(info.storage_total)
+        else:
+            self.device_info_labels["storage"].setText("--")
+
+        self.device_info_labels["resolution"].setText(info.resolution or "--")
+        self.device_info_labels["security_patch"].setText(info.security_patch or "--")
+
+    def _reboot_default(self):
+        self._reboot_device("system")
+
+    def _wrap_panel(self, title: str, panel: FilePanel) -> QWidget:
+        panel.set_panel_title(title)
+        return panel
 
     def _build_toolbar(self):
         tb = QToolBar("工具栏", self)
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        tb.addWidget(QLabel("设备: ", self))
+        tb.addWidget(QLabel(" 设备: ", self))
         self.device_combo = QComboBox(self)
         self.device_combo.setMinimumWidth(200)
         self.device_combo.currentIndexChanged.connect(self._on_device_selected)
         tb.addWidget(self.device_combo)
-        self.refresh_devices_btn = QPushButton("刷新设备", self)
+        self.refresh_devices_btn = QPushButton("刷新", self)
+        self.refresh_devices_btn.setToolTip("刷新设备列表")
         self.refresh_devices_btn.clicked.connect(self._refresh_devices)
         tb.addWidget(self.refresh_devices_btn)
+
+        tb.addSeparator()
         self.mirror_btn = QPushButton("投屏", self)
         self.mirror_btn.setToolTip("把手机屏幕投到电脑（scrcpy）")
         self.mirror_btn.clicked.connect(self._open_mirror)
         tb.addWidget(self.mirror_btn)
-
-        tb.addSeparator()
         self.scrshot_btn = QPushButton("截屏", self)
         self.scrshot_btn.setToolTip("截取手机屏幕保存到桌面")
         self.scrshot_btn.clicked.connect(self._screenshot)
@@ -243,11 +334,11 @@ class MainWindow(QMainWindow):
         self.logcat_btn.setToolTip("实时查看手机日志")
         self.logcat_btn.clicked.connect(self._show_logcat)
         tb.addWidget(self.logcat_btn)
-        self.pair_btn = QPushButton("无线配对", self)
+        self.pair_btn = QPushButton("配对", self)
         self.pair_btn.setToolTip("无线 ADB 配对连接")
         self.pair_btn.clicked.connect(self._show_pair)
         tb.addWidget(self.pair_btn)
-        self.toggle_btn = QPushButton("系统开关", self)
+        self.toggle_btn = QPushButton("开关", self)
         self.toggle_btn.setToolTip("Wi-Fi/蓝牙/充电常亮/动画缩放")
         self.toggle_btn.clicked.connect(self._show_toggles)
         tb.addWidget(self.toggle_btn)
@@ -257,31 +348,26 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.fastboot_btn)
 
         tb.addSeparator()
-        self.reboot_btn = QToolButton(self)
-        self.reboot_btn.setText("重启 ▾")
-        self.reboot_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.reboot_btn = QPushButton("重启", self)
+        self.reboot_btn.setToolTip("重启设备（点击选择模式）")
         self.reboot_menu = QMenu(self)
         for text, mode in (
             ("重启系统", "system"),
             ("重启到 Recovery", "recovery"),
-            ("重启到 Fastboot(引导加载器)", "bootloader"),
+            ("重启到 Fastboot", "bootloader"),
             ("重启到 FastbootD", "fastboot"),
         ):
             act = self.reboot_menu.addAction(text)
             act.triggered.connect(lambda _, m=mode: self._reboot_device(m))
         self.reboot_btn.setMenu(self.reboot_menu)
-        self.reboot_btn.setToolTip("adb 模式下重启设备")
+        self.reboot_btn.clicked.connect(self._reboot_default)
         tb.addWidget(self.reboot_btn)
 
         tb.addSeparator()
-        self.swap_btn = QPushButton("⇄ 交换栏", self)
+        self.swap_btn = QPushButton("⇄ 交换", self)
         self.swap_btn.setToolTip("左右两栏互换位置")
         self.swap_btn.clicked.connect(self._swap_panels)
         tb.addWidget(self.swap_btn)
-
-        self.show_hidden = QCheckBox("显示隐藏", self)
-        self.show_hidden.toggled.connect(self._set_hidden)
-        tb.addWidget(self.show_hidden)
 
     def _build_menubar(self):
         m = self.menuBar()
@@ -379,6 +465,11 @@ class MainWindow(QMainWindow):
         else:
             self.phone_panel.navigate(root)
         self.statusBar().showMessage(f"已连接 {serial}")
+        try:
+            info = self.adb.get_device_info()
+            self._update_device_info(info)
+        except Exception:
+            self._update_device_info(None)
 
     # ---------- view actions ----------
 

@@ -31,6 +31,16 @@ class DeviceInfo:
     state: str = ""
     market_name: str = ""
     code: str = ""
+    manufacturer: str = ""
+    android_sdk: str = ""
+    resolution: str = ""
+    battery_level: str = ""
+    battery_status: str = ""
+    storage_total: str = ""
+    storage_free: str = ""
+    security_patch: str = ""
+    miui_version: str = ""
+
 
 
 class AdbClient:
@@ -175,20 +185,63 @@ class AdbClient:
 
     def get_device_info(self) -> DeviceInfo:
         info = DeviceInfo(serial=self._device)
-        props = {
-            "model": "ro.product.model",
-            "android_version": "ro.build.version.release",
-            "market_name": "ro.product.marketname",
-            "code": "ro.product.device",
-        }
-        for field, prop in props.items():
+        prop_map = [
+            ("model", "ro.product.model"),
+            ("android_version", "ro.build.version.release"),
+            ("market_name", "ro.product.marketname"),
+            ("code", "ro.product.device"),
+            ("manufacturer", "ro.product.manufacturer"),
+            ("android_sdk", "ro.build.version.sdk"),
+            ("security_patch", "ro.build.version.security_patch"),
+            ("miui_version", "ro.miui.ui.version.name"),
+        ]
+        for field, prop in prop_map:
             try:
                 value = self._run(["shell", f"getprop {prop}"]).strip()
                 if value:
                     setattr(info, field, value)
             except AdbError:
                 pass
+        try:
+            out = self._run(["shell", "wm size"], check=False).strip()
+            m = re.search(r"Physical size: (.+)", out)
+            if m:
+                info.resolution = m.group(1).strip()
+        except AdbError:
+            pass
+        try:
+            out = self._run(["shell", "dumpsys battery"], check=False)
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("level:"):
+                    info.battery_level = line.split(":", 1)[1].strip() + "%"
+                elif line.startswith("status:"):
+                    code = line.split(":", 1)[1].strip()
+                    status_map = {"2": "充电中", "3": "放电中", "4": "未充电", "5": "已充满"}
+                    info.battery_status = status_map.get(code, code)
+        except AdbError:
+            pass
+        try:
+            out = self._run(["shell", "df /sdcard"], check=False)
+            for line in out.splitlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 4:
+                    total_kb = int(parts[1]) if parts[1].isdigit() else 0
+                    free_kb = int(parts[3]) if parts[3].isdigit() else 0
+                    if total_kb > 0:
+                        info.storage_total = self._fmt_kb(total_kb)
+                        info.storage_free = self._fmt_kb(free_kb)
+                        break
+        except (AdbError, ValueError):
+            pass
         return info
+
+    @staticmethod
+    def _fmt_kb(kb: int) -> str:
+        gb = kb / 1048576
+        if gb >= 1:
+            return f"{gb:.1f} GB"
+        return f"{kb / 1024:.0f} MB"
 
     # ---------- wireless pairing ----------
 
@@ -272,7 +325,7 @@ class AdbClient:
         if proc.returncode != 0:
             raise AdbError("截屏失败")
 
-    def start_recording(self, remote_path: str = "/sdcard/adbpush_rec.mp4") -> str:
+    def start_recording(self, remote_path: str = "/sdcard/adbtool_rec.mp4") -> str:
         cmd = [self.adb_path]
         if self._device:
             cmd += ["-s", self._device]

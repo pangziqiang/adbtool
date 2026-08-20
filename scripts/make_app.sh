@@ -1,12 +1,12 @@
-#!/bin/bash
-# Build a double-clickable adbpush.app on the Desktop.
 set -e
 
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$HOME/Desktop/adbpush.app"
+APP="$HOME/Desktop/adbtool.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/Resources"
+cp "$PROJECT/assets/adbtool.icns" "$APP/Contents/Resources/adbtool.icns" 2>/dev/null || true
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -14,19 +14,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>ADB Push</string>
+    <string>ADB Tool</string>
     <key>CFBundleDisplayName</key>
-    <string>ADB Push</string>
+    <string>ADB Tool</string>
     <key>CFBundleIdentifier</key>
-    <string>com.adbpush.app</string>
+    <string>com.adbtool.app</string>
     <key>CFBundleExecutable</key>
-    <string>adbpush</string>
+    <string>adbtool</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>adbtool</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.15</string>
     <key>NSHighResolutionCapable</key>
@@ -35,13 +37,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-cat > "$APP/Contents/MacOS/adbpush" <<SCRIPT
+cat > "$APP/Contents/MacOS/adbtool" <<'LAUNCHER'
 #!/bin/bash
-LOG="/tmp/adbpush_app.log"
-echo "[$(date)] launching" >> "\$LOG"
-cd "$PROJECT" || { echo "cd failed: $PROJECT" >> "\$LOG"; exit 1; }
-exec "$PROJECT/venv/bin/python" -m adbpush.main >> "\$LOG" 2>&1
-SCRIPT
+LOG="/tmp/adbtool_app.log"
+echo "[$(date)] launching" >> "$LOG"
+cd "/Volumes/winandmac/adbtool" || { echo "cd failed" >> "$LOG"; exit 1; }
+exec "/Volumes/winandmac/adbtool/venv/bin/python" -c "
+import sys, os
+os.chdir('PROJECT_PATH_PLACEHOLDER')
+from adbtool.main import main
+main()
+" >> "$LOG" 2>&1
+LAUNCHER
 
-chmod +x "$APP/Contents/MacOS/adbpush"
+# Fix the placeholder with actual project path
+sed -i '' "s|PROJECT_PATH_PLACEHOLDER|$PROJECT|g" "$APP/Contents/MacOS/adbtool"
+
+chmod +x "$APP/Contents/MacOS/adbtool"
 echo "已创建: $APP"

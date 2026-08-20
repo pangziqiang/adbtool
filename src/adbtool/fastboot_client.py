@@ -359,7 +359,7 @@ class FastbootClient:
         progress_cb: Callable[[int, int, str], None] | None = None,
     ) -> None:
         zstd = None
-        tmp_root = tempfile.mkdtemp(prefix="adbpush_fbimg_")
+        tmp_root = tempfile.mkdtemp(prefix="adbtool_fbimg_")
         try:
             total = len(cmds)
             for i, c in enumerate(cmds, 1):
