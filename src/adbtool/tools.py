@@ -1146,6 +1146,8 @@ class FastbootDialog(QDialog):
         self.part_del.clicked.connect(self._remove_part_rows)
         self.part_load = QPushButton("从刷机包载入", self)
         self.part_load.clicked.connect(self._load_pkg_rows)
+        self.img_add = QPushButton("添加镜像", self)
+        self.img_add.clicked.connect(self._add_img_files)
         self.wipe_combo = QComboBox(self)
         self.wipe_combo.addItems(["保留数据刷机", "清除数据刷机"])
         self.wipe_combo.setToolTip("清除数据刷机将擦除 userdata 与 metadata，手机数据全部丢失")
@@ -1155,6 +1157,7 @@ class FastbootDialog(QDialog):
         grp1.addWidget(self.part_add)
         grp1.addWidget(self.part_del)
         grp1.addWidget(self.part_load)
+        grp1.addWidget(self.img_add)
         grp1.addWidget(QLabel("刷机模式", self))
         grp1.addWidget(self.wipe_combo)
         grp1.addWidget(self.flash_btn)
@@ -1378,6 +1381,30 @@ class FastbootDialog(QDialog):
             item.setToolTip(path)
         # 替换浏览按钮为可再编辑（保留按钮即可，tooltip 已有路径）
 
+
+    def _add_img_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择镜像文件",
+            os.path.expanduser("~/Desktop"),
+            "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
+        )
+        if not files:
+            return
+        count = 0
+        for f in files:
+            name = os.path.basename(f)
+            part = name.lower()
+            for suffix in (".img", ".img.zst", ".lz4"):
+                if part.endswith(suffix):
+                    part = part[:-len(suffix)]
+                    break
+            for prefix in ("image-", "flash_"):
+                if part.startswith(prefix):
+                    part = part[len(prefix):]
+            self._insert_part_row(part, f)
+            count += 1
+        self._resize_table_to_rows()
+        self.status.setText("已添加 " + str(count) + " 个镜像")
     def _load_pkg_rows(self):
         pkg = self.pkg_edit.text().strip()
         if not os.path.isdir(pkg):
