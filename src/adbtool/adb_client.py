@@ -155,15 +155,13 @@ class AdbClient:
     def _run_transfer(
         self,
         args: list[str],
-        idle_timeout: float = 180,
-        total_timeout: float = 21600,
+        total_timeout: float = 43200,
     ) -> str:
-        """运行传输命令，使用空闲超时：仅当长时间无数据传输时才中断。
+        """运行传输命令，与命令行行为一致：不主动中断，交给 adb 自行完成或失败。
 
-        adb pull/push 对无线传输大文件较慢，用绝对超时容易误杀；这里改为
-        用伪终端(pty)运行 adb，让 adb 把 stdout 当作终端并持续输出传输进度，
-        再以 select 监听，只要有进度数据到达就刷新计时；仅当长时间无任何
-        进度时才判定为连接卡死并中断。
+        用伪终端(pty)运行 adb 以便持续输出进度；无线大文件传输可能中途遇到
+        卡顿/丢包，adbd/TCP 会自行恢复或报错，因此这里不设空闲超时主动杀进程，
+        仅保留一个很大的总时长上限兜底，避免无线彻底断开时永久挂起。
         """
         cmd = [self.adb_path]
         if self._device:
@@ -176,7 +174,6 @@ class AdbClient:
         )
         os.close(slave)
         buf = b""
-        last = time.time()
         start = time.time()
         try:
             while True:
@@ -185,14 +182,7 @@ class AdbClient:
                 if time.time() - start > total_timeout:
                     proc.kill()
                     raise AdbError("adb 传输超过总时长上限，已终止")
-                wait = idle_timeout - (time.time() - last)
-                if wait <= 0:
-                    proc.kill()
-                    raise AdbError(
-                        f"adb 传输无响应（{int(idle_timeout)} 秒无数据），"
-                        "无线连接可能不稳定"
-                    )
-                ready, _, _ = select.select([master], [], [], wait)
+                ready, _, _ = select.select([master], [], [], 30)
                 if master in ready:
                     try:
                         data = os.read(master, 65536)
