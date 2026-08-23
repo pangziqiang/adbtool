@@ -107,6 +107,42 @@ class BrewWorker(QThread):
             self.failed.emit(str(e))
 
 
+class DeviceRefreshWorker(QThread):
+    """后台刷新设备列表与设备信息，避免阻塞 UI。"""
+
+    done = pyqtSignal(list, int)   # ([(serial, label)], 总设备数)
+    failed = pyqtSignal(str)
+
+    def __init__(self, adb: AdbClient, parent=None):
+        super().__init__(parent)
+        self.adb = adb
+
+    def run(self):
+        try:
+            devs = self.adb.list_devices()
+        except AdbError as e:
+            self.failed.emit(str(e))
+            return
+        available = [d for d in devs if d.state == "device"]
+        result: list[tuple[str, str]] = []
+        for d in available:
+            self.adb.device = d.serial
+            try:
+                info = self.adb.get_device_info()
+                d.market_name = info.market_name
+                d.code = info.code
+                if not d.model:
+                    d.model = info.model
+            except Exception:
+                pass
+            if d.market_name:
+                label = f"{d.market_name} ({d.code})" if d.code else d.market_name
+            else:
+                label = f"{d.serial} ({d.model})" if d.model else d.serial
+            result.append((d.serial, label))
+        self.done.emit(result, len(devs))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -114,6 +150,7 @@ class MainWindow(QMainWindow):
         self.resize(1180, 700)
         self.adb = self._create_adb()
         self._worker: TransferWorker | None = None
+        self._device_worker: DeviceRefreshWorker | None = None
 
         self._build_ui()
         self._init_local_panel()
@@ -402,48 +439,44 @@ class MainWindow(QMainWindow):
     # ---------- device ----------
 
     def _refresh_devices(self):
+        if self._device_worker and self._device_worker.isRunning():
+            return
         self.statusBar().showMessage("正在刷新设备...")
         self.device_combo.blockSignals(True)
         self.device_combo.clear()
-        try:
-            devices = self.adb.list_devices()
-        except AdbError as e:
-            self.statusBar().showMessage(f"adb 错误: {e}")
-            return
-        available = [d for d in devices if d.state == "device"]
-        for d in available:
-            self.adb.device = d.serial
-            try:
-                info = self.adb.get_device_info()
-                d.market_name = info.market_name
-                d.code = info.code
-                if not d.model:
-                    d.model = info.model
-            except AdbError:
-                pass
-            if d.market_name:
-                label = f"{d.market_name} ({d.code})" if d.code else d.market_name
-            else:
-                label = f"{d.serial} ({d.model})" if d.model else d.serial
+        self.refresh_devices_btn.setEnabled(False)
+        self._device_worker = DeviceRefreshWorker(self.adb, self)
+        self._device_worker.done.connect(self._on_devices_loaded)
+        self._device_worker.failed.connect(self._on_device_refresh_failed)
+        self._device_worker.start()
+
+    def _on_devices_loaded(self, result, total):
+        self.refresh_devices_btn.setEnabled(True)
+        for serial, label in result:
             row = self.device_combo.count()
-            self.device_combo.addItem(label, d.serial)
-            self.device_combo.setItemData(row, d.serial, Qt.ItemDataRole.ToolTipRole)
+            self.device_combo.addItem(label, serial)
+            self.device_combo.setItemData(row, serial, Qt.ItemDataRole.ToolTipRole)
         self.device_combo.blockSignals(False)
-        if available:
+        if result:
             self._on_device_selected(0)
-            self.statusBar().showMessage(f"检测到 {len(available)} 台设备")
+            self.statusBar().showMessage(f"检测到 {len(result)} 台设备")
         else:
             if self.adb.device:
                 self.adb.device = ""
                 self.phone_panel.clear_content()
-            if devices:
+            if total:
                 self.statusBar().showMessage(
-                    f"{len(devices)} 台设备离线（可能已断开连接），请重新连接后刷新"
+                    f"{total} 台设备离线（可能已断开连接），请重新连接后刷新"
                 )
             else:
                 self.statusBar().showMessage(
                     "未检测到设备：请确认手机开启 USB 调试、已授权，无线连接时手机勿锁屏"
                 )
+
+    def _on_device_refresh_failed(self, msg):
+        self.refresh_devices_btn.setEnabled(True)
+        self.device_combo.blockSignals(False)
+        self.statusBar().showMessage(f"adb 错误: {msg}")
 
     def _on_device_selected(self, index: int):
         if index < 0:

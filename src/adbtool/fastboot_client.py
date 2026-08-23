@@ -145,7 +145,14 @@ class FastbootClient:
                 pass
         return sorted(partitions)
     def flash(self, partition: str, img_path: str, line_cb=None) -> None:
-        self._run(["flash", partition, img_path], timeout=600, line_cb=line_cb)
+        if img_path.endswith((".zst", ".lz4")):
+            plain, tmp_root = self._decompress_to_tmp(img_path)
+            try:
+                self._run(["flash", partition, plain], timeout=600, line_cb=line_cb)
+            finally:
+                shutil.rmtree(tmp_root, ignore_errors=True)
+        else:
+            self._run(["flash", partition, img_path], timeout=600, line_cb=line_cb)
 
     def erase(self, partition: str, line_cb=None) -> None:
         self._run(["erase", partition], timeout=300, line_cb=line_cb)
@@ -263,10 +270,38 @@ class FastbootClient:
 
     @staticmethod
     def _find_zstd() -> str:
-        which = shutil.which("zstd")
-        if which:
-            return which
+        for p in (
+            shutil.which("zstd"),
+            "/usr/local/bin/zstd",
+            "/opt/homebrew/bin/zstd",
+        ):
+            if p and os.path.isfile(p):
+                return p
         raise FastbootError("未找到 zstd，请用 brew install zstd 安装")
+
+    @staticmethod
+    def _find_lz4() -> str:
+        for p in (
+            shutil.which("lz4"),
+            "/usr/local/bin/lz4",
+            "/opt/homebrew/bin/lz4",
+        ):
+            if p and os.path.isfile(p):
+                return p
+        raise FastbootError("未找到 lz4，请用 brew install lz4 安装")
+
+    def _decompress_to_tmp(self, path: str) -> tuple[str, str]:
+        """将 .zst / .lz4 镜像解压到临时目录，返回 (明文路径, 临时目录)。"""
+        tmp_root = tempfile.mkdtemp(prefix="adbtool_fbimg_")
+        if path.endswith(".lz4"):
+            dst = os.path.join(tmp_root, os.path.basename(path)[: -len(".lz4")])
+            lz4 = self._find_lz4()
+            subprocess.run([lz4, "-d", path, dst], check=True, timeout=3600)
+        else:
+            dst = os.path.join(tmp_root, os.path.basename(path)[: -len(".zst")])
+            zstd = self._find_zstd()
+            subprocess.run([zstd, "-d", path, "-o", dst], check=True, timeout=3600)
+        return dst, tmp_root
 
     def _find_flash_script(self, pkg_dir: str) -> str:
         names = (

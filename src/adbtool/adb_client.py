@@ -81,9 +81,12 @@ class AdbClient:
         if self._device:
             cmd += ["-s", self._device]
         cmd += args
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
-        )
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            raise AdbError(f"adb 命令超时: {' '.join(cmd[1:3])}") from None
         if check and proc.returncode != 0:
             raise AdbError(proc.stderr.strip() or proc.stdout.strip())
         return proc.stdout
@@ -172,12 +175,12 @@ class AdbClient:
         self._run(["shell", f"cp -r {s} {d}"])
 
     def get_storage_root(self) -> str:
-        out = self._run(["shell", "echo $EXTERNAL_STORAGE"], check=False).strip()
+        out = self._run(["shell", "echo $EXTERNAL_STORAGE"], check=False, timeout=6).strip()
         if out and out != "$EXTERNAL_STORAGE":
             return out
         for candidate in ("/sdcard", "/storage/emulated/0"):
             try:
-                self._run(["shell", f"test -d {candidate} && echo ok"])
+                self._run(["shell", f"test -d {candidate} && echo ok"], timeout=6)
                 return candidate
             except AdbError:
                 continue
@@ -197,20 +200,20 @@ class AdbClient:
         ]
         for field, prop in prop_map:
             try:
-                value = self._run(["shell", f"getprop {prop}"]).strip()
+                value = self._run(["shell", f"getprop {prop}"], timeout=6).strip()
                 if value:
                     setattr(info, field, value)
             except AdbError:
                 pass
         try:
-            out = self._run(["shell", "wm size"], check=False).strip()
+            out = self._run(["shell", "wm size"], check=False, timeout=6).strip()
             m = re.search(r"Physical size: (.+)", out)
             if m:
                 info.resolution = m.group(1).strip()
         except AdbError:
             pass
         try:
-            out = self._run(["shell", "dumpsys battery"], check=False)
+            out = self._run(["shell", "dumpsys battery"], check=False, timeout=6)
             for line in out.splitlines():
                 line = line.strip()
                 if line.startswith("level:"):
@@ -222,7 +225,7 @@ class AdbClient:
         except AdbError:
             pass
         try:
-            out = self._run(["shell", "df /sdcard"], check=False)
+            out = self._run(["shell", "df /sdcard"], check=False, timeout=6)
             for line in out.splitlines()[1:]:
                 parts = line.split()
                 if len(parts) >= 4:
