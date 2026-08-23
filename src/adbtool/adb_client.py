@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pty
 import re
 import select
 import shlex
@@ -142,34 +143,38 @@ class AdbClient:
         return entries
 
     def push(self, local_path: str, remote_path: str, callback=None) -> None:
-        self._run_transfer(["push", local_path, remote_path])
+        self._run_transfer(["push", "-p", local_path, remote_path])
         if callback:
             callback(1.0)
 
     def pull(self, remote_path: str, local_path: str, callback=None) -> None:
-        self._run_transfer(["pull", remote_path, local_path])
+        self._run_transfer(["pull", "-p", remote_path, local_path])
         if callback:
             callback(1.0)
 
     def _run_transfer(
         self,
         args: list[str],
-        idle_timeout: float = 30,
-        total_timeout: float = 7200,
+        idle_timeout: float = 180,
+        total_timeout: float = 21600,
     ) -> str:
         """运行传输命令，使用空闲超时：仅当长时间无数据传输时才中断。
 
         adb pull/push 对无线传输大文件较慢，用绝对超时容易误杀；这里改为
-        以 select 监听管道输出，只要有数据到达就刷新计时。
+        用伪终端(pty)运行 adb，让 adb 把 stdout 当作终端并持续输出传输进度，
+        再以 select 监听，只要有进度数据到达就刷新计时；仅当长时间无任何
+        进度时才判定为连接卡死并中断。
         """
         cmd = [self.adb_path]
         if self._device:
             cmd += ["-s", self._device]
         cmd += args
+        master, slave = pty.openpty()
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            cmd, stdout=slave, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, close_fds=True,
         )
-        fd = proc.stdout.fileno()
+        os.close(slave)
         buf = b""
         last = time.time()
         start = time.time()
@@ -187,20 +192,25 @@ class AdbClient:
                         f"adb 传输无响应（{int(idle_timeout)} 秒无数据），"
                         "无线连接可能不稳定"
                     )
-                ready, _, _ = select.select([fd], [], [], wait)
-                if fd in ready:
-                    data = os.read(fd, 65536)
+                ready, _, _ = select.select([master], [], [], wait)
+                if master in ready:
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError:
+                        data = b""
                     if not data:
                         break
                     buf += data
                     last = time.time()
             out = buf.decode(errors="replace")
             proc.wait()
+            os.close(master)
             if proc.returncode != 0:
                 raise AdbError(out.strip() or "adb 传输失败")
             return out
         except subprocess.TimeoutExpired:
             proc.kill()
+            os.close(master)
             raise AdbError("adb 传输超时") from None
 
     def install_apk(self, apks: list[str], callback=None) -> None:
