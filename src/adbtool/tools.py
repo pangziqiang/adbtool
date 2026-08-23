@@ -48,6 +48,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from .adb_client import AdbClient, AdbError
@@ -1106,18 +1107,7 @@ class FastbootDialog(QDialog):
 
         lay = QVBoxLayout(self)
 
-        # Flow guide
-        flow_guide = QLabel(
-            "① 进入 Fastboot  →  ② 选择刷机包或读取分区表  →  ③ 勾选刷入项  →  ④ 执行刷入  →  ⑤ 重启",
-            self,
-        )
-        flow_guide.setStyleSheet(
-            "color: #999; font-size: 12px; padding: 6px 12px; background: #2b2b2b; border-radius: 4px; margin-bottom: 4px;"
-        )
-        flow_guide.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(flow_guide)
-
-        # Device row
+        # 顶部固定：设备状态
         dev = QHBoxLayout()
         self.serial_label = QLabel("fastboot 设备: 无", self)
         self.dev_state = QLabel("", self)
@@ -1131,47 +1121,63 @@ class FastbootDialog(QDialog):
         dev.addWidget(self.refresh_btn)
         lay.addLayout(dev)
 
-        # Status info
         self.info = QLabel("", self)
         self.info.setWordWrap(True)
         lay.addWidget(self.info)
 
-        # Partition + flash row
+        # 标签页
+        self.tabs = QTabWidget(self)
+        lay.addWidget(self.tabs)
+
+        # ---- 标签①：分区刷入 ----
+        tab_part = QWidget(self)
+        vp = QVBoxLayout(tab_part)
+
         grp1 = QHBoxLayout()
-        self.part_name = QLineEdit(self)
+        self.part_name = QLineEdit(tab_part)
         self.part_name.setPlaceholderText("分区名…")
-        self.part_add = QPushButton("添加分区", self)
+        self.part_add = QPushButton("添加分区", tab_part)
         self.part_add.clicked.connect(self._add_part_row)
-        self.part_del = QPushButton("移除所选", self)
+        self.part_del = QPushButton("移除所选", tab_part)
         self.part_del.clicked.connect(self._remove_part_rows)
-        self.part_load = QPushButton("从刷机包载入", self)
-        self.part_load.clicked.connect(self._load_pkg_rows)
-        self.img_add = QPushButton("添加镜像", self)
+        self.img_add = QPushButton("添加镜像", tab_part)
         self.img_add.clicked.connect(self._add_img_files)
-        self.wipe_combo = QComboBox(self)
-        self.wipe_combo.addItems(["保留数据刷机", "清除数据刷机"])
-        self.wipe_combo.setToolTip("清除数据刷机将擦除 userdata 与 metadata，手机数据全部丢失")
-        self.flash_btn = QPushButton("执行刷入", self)
-        self.flash_btn.clicked.connect(self._flash_checked)
         grp1.addWidget(self.part_name, 1)
         grp1.addWidget(self.part_add)
         grp1.addWidget(self.part_del)
-        grp1.addWidget(self.part_load)
         grp1.addWidget(self.img_add)
-        grp1.addWidget(QLabel("刷机模式", self))
-        grp1.addWidget(self.wipe_combo)
-        grp1.addWidget(self.flash_btn)
-        lay.addLayout(grp1)
+        vp.addLayout(grp1)
+
+        # 快捷刷入常用镜像
+        grp_q = QHBoxLayout()
+        grp_q.addWidget(QLabel("快捷刷入", tab_part))
+        self.quick_combo = QComboBox(tab_part)
+        self.quick_combo.addItems(
+            ["boot", "boot_a", "boot_b", "init_boot", "init_boot_a",
+             "recovery", "vendor_boot", "vendor_boot_a", "dtbo",
+             "vbmeta", "vbmeta_system", "modem", "system", "vendor", "super"]
+        )
+        self.quick_combo.setToolTip("选择要刷入的常用分区")
+        self.quick_img_btn = QPushButton("选镜像…", tab_part)
+        self.quick_img_btn.clicked.connect(self._quick_pick)
+        self.quick_path = ""
+        self.quick_add = QPushButton("加入刷写列表", tab_part)
+        self.quick_add.clicked.connect(self._quick_add)
+        grp_q.addWidget(self.quick_combo)
+        grp_q.addWidget(self.quick_img_btn)
+        grp_q.addWidget(self.quick_add)
+        grp_q.addStretch(1)
+        vp.addLayout(grp_q)
 
         # -- Visual partition flash browser --
         grp_pv = QHBoxLayout()
-        self.read_part_btn = QPushButton("读取分区表", self)
+        self.read_part_btn = QPushButton("读取分区表", tab_part)
         self.read_part_btn.clicked.connect(self._read_partitions)
         grp_pv.addWidget(self.read_part_btn)
         grp_pv.addStretch(1)
-        lay.addLayout(grp_pv)
+        vp.addLayout(grp_pv)
 
-        self.part_browser = QTableWidget(self)
+        self.part_browser = QTableWidget(tab_part)
         self.part_browser.setColumnCount(4)
         self.part_browser.setHorizontalHeaderLabels(
             ["", "分区名", "镜像文件", "选择镜像"]
@@ -1190,19 +1196,19 @@ class FastbootDialog(QDialog):
         )
         self.part_browser.setMaximumHeight(0)
         self.part_browser._part_map = {}
-        lay.addWidget(self.part_browser)
+        vp.addWidget(self.part_browser)
 
         grp_pb = QHBoxLayout()
-        self.part_browser_add = QPushButton("添加选中到刷写列表", self)
+        self.part_browser_add = QPushButton("添加选中到刷写列表", tab_part)
         self.part_browser_add.clicked.connect(self._add_selected_partitions)
         self.part_browser_add.setVisible(False)
         grp_pb.addWidget(self.part_browser_add)
         grp_pb.addStretch(1)
         self._grp_pb = grp_pb
-        lay.addLayout(grp_pb)
+        vp.addLayout(grp_pb)
 
         # Partition table
-        self.part_table = QTableWidget(self)
+        self.part_table = QTableWidget(tab_part)
         self.part_table.setColumnCount(5)
         self.part_table.setHorizontalHeaderLabels(
             ["刷入", "分区", "镜像文件", "操作", "进度"]
@@ -1223,35 +1229,88 @@ class FastbootDialog(QDialog):
             4, QHeaderView.ResizeMode.Fixed
         )
         self.part_table.setColumnWidth(4, 120)
-        lay.addWidget(self.part_table)
+        vp.addWidget(self.part_table)
+
+        grp_flash = QHBoxLayout()
+        self.wipe_combo = QComboBox(tab_part)
+        self.wipe_combo.addItems(["保留数据刷机", "清除数据刷机"])
+        self.wipe_combo.setToolTip("清除数据刷机将擦除 userdata 与 metadata，手机数据全部丢失")
+        self.auto_reboot = QCheckBox("刷完自动重启", tab_part)
+        self.auto_reboot.setToolTip("刷写完成后自动执行 fastboot reboot")
+        self.flash_btn = QPushButton("执行刷入", tab_part)
+        self.flash_btn.clicked.connect(self._flash_checked)
+        grp_flash.addWidget(QLabel("刷机模式", tab_part))
+        grp_flash.addWidget(self.wipe_combo)
+        grp_flash.addStretch(1)
+        grp_flash.addWidget(self.auto_reboot)
+        grp_flash.addWidget(self.flash_btn)
+        vp.addLayout(grp_flash)
+        self.tabs.addTab(tab_part, "分区刷入")
+
+        # ---- 标签②：完整包刷入 ----
+        tab_pkg = QWidget(self)
+        vk = QVBoxLayout(tab_pkg)
+
+        hint = QLabel(
+            "选择完整刷机包（解压目录 / 卡刷 zip / payload.bin），解析后一键刷入。", tab_pkg
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#888;")
+        vk.addWidget(hint)
 
         # Package dir row
         grp2b = QHBoxLayout()
-        self.pkg_edit = QLineEdit(self)
-        self.pkg_edit.setPlaceholderText("选择刷机包目录（含 images/ 和 FlashScript，如 Mio-kitchen 包）…")
-        self.pkg_browse = QPushButton("选择目录…", self)
+        self.pkg_edit = QLineEdit(tab_pkg)
+        self.pkg_edit.setPlaceholderText("选择刷机包目录，或卡刷包 zip / payload.bin 文件…")
+        self.pkg_browse = QPushButton("选择目录…", tab_pkg)
         self.pkg_browse.clicked.connect(self._browse_pkg)
-        self.pkg_parse = QPushButton("解析刷机包", self)
+        self.pkg_browse_file = QPushButton("选 zip/payload…", tab_pkg)
+        self.pkg_browse_file.clicked.connect(self._browse_pkg_file)
+        self.pkg_parse = QPushButton("解析刷机包", tab_pkg)
         self.pkg_parse.clicked.connect(self._parse_pkg)
         grp2b.addWidget(self.pkg_edit, 1)
         grp2b.addWidget(self.pkg_browse)
+        grp2b.addWidget(self.pkg_browse_file)
         grp2b.addWidget(self.pkg_parse)
-        lay.addLayout(grp2b)
+        vk.addLayout(grp2b)
 
-        # Reboot row
+        self.pkg_preview = QListWidget(tab_pkg)
+        self.pkg_preview.setStyleSheet("QListWidget::item { font-family: Menlo; font-size: 11px; }")
+        vk.addWidget(self.pkg_preview, 1)
+
+        grp_pkg = QHBoxLayout()
+        self.pkg_wipe = QCheckBox("清除数据（擦除 userdata/metadata）", tab_pkg)
+        self.pkg_reboot = QCheckBox("刷完自动重启", tab_pkg)
+        self.pkg_flash_btn = QPushButton("一键完整刷入", tab_pkg)
+        self.pkg_flash_btn.clicked.connect(self._flash_package)
+        grp_pkg.addWidget(self.pkg_wipe)
+        grp_pkg.addWidget(self.pkg_reboot)
+        grp_pkg.addStretch(1)
+        grp_pkg.addWidget(self.pkg_flash_btn)
+        vk.addLayout(grp_pkg)
+        self.tabs.addTab(tab_pkg, "完整包刷入")
+
+        # ---- 标签③：设备与重启 ----
+        tab_dev = QWidget(self)
+        vd = QVBoxLayout(tab_dev)
+        dev_hint = QLabel("设备维护操作：重启到指定模式、继续开机引导。", tab_dev)
+        dev_hint.setStyleSheet("color:#888;")
+        vd.addWidget(dev_hint)
         grp3 = QHBoxLayout()
-        self.reboot_combo = QComboBox(self)
+        self.reboot_combo = QComboBox(tab_dev)
         self.reboot_combo.addItems(
             ["重启到系统", "重启到 Recovery", "重启到 FastbootD", "重启回 Bootloader", "继续启动(continue)"]
         )
-        self.reboot_btn = QPushButton("执行重启", self)
+        self.reboot_btn = QPushButton("执行重启", tab_dev)
         self.reboot_btn.clicked.connect(self._fb_reboot)
-        grp3.addWidget(QLabel("重启", self))
+        grp3.addWidget(QLabel("重启", tab_dev))
         grp3.addWidget(self.reboot_combo, 1)
         grp3.addWidget(self.reboot_btn)
-        lay.addLayout(grp3)
+        vd.addLayout(grp3)
+        vd.addStretch(1)
+        self.tabs.addTab(tab_dev, "设备与重启")
 
-        # 输出区
+        # 底部固定：输出区 + 状态
         self.output = QListWidget(self)
         self.output.setStyleSheet("QListWidget::item { font-family: Menlo; font-size: 11px; }")
         lay.addWidget(self.output, 1)
@@ -1321,26 +1380,81 @@ class FastbootDialog(QDialog):
         if path:
             self.pkg_edit.setText(path)
 
-    def _parse_pkg(self):
+    def _browse_pkg_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择卡刷包", os.path.expanduser("~/Downloads"),
+            "卡刷包 (*.zip *.bin);;所有文件 (*)"
+        )
+        if path:
+            self.pkg_edit.setText(path)
+
+    def _start_parse(self):
         pkg = self.pkg_edit.text().strip()
-        if not os.path.isdir(pkg):
-            self.status.setText("请先选择有效的刷机包目录")
+        if not os.path.exists(pkg):
+            self.status.setText("请选择有效的刷机包目录、zip 或 payload.bin 文件")
             return
-        try:
-            result = self.fb.parse_package(pkg)
-        except FastbootError as e:
-            self.status.setText(f"X 解析失败: {e}")
-            return
-        self._pkg = pkg
+        self.pkg_parse.setEnabled(False)
+        self.output.clear()
+        self.status.setText("正在解析刷机包（解包时可能较慢，请稍候）...")
+
+        def work(cb, ui):
+            if os.path.isdir(pkg):
+                return self.fb.parse_package(pkg, line_cb=cb)
+            if pkg.lower().endswith(".zip"):
+                return self.fb.parse_zip(pkg, line_cb=cb)
+            return self.fb.parse_payload(pkg, line_cb=cb)
+
+        self._worker = FastbootWorker(work, self)
+        self._worker.line.connect(self._queue_out)
+        self._worker.done.connect(self._on_pkg_parsed)
+        self._worker.fail.connect(self._on_pkg_parse_fail)
+        self._worker.start()
+
+    def _parse_pkg(self):
+        self._start_parse()
+
+    def _on_pkg_parsed(self, result):
+        self.pkg_parse.setEnabled(True)
+        result = result[0]
+        self._pkg = self.pkg_edit.text().strip()
         self._pkg_meta = result
         self._cmds = result["commands"]
-        self.output.clear()
+        self.pkg_preview.clear()
         for i, c in enumerate(self._cmds, 1):
-            self.output.addItem(f"[{i}/{len(self._cmds)}] {c['raw']}")
+            self.pkg_preview.addItem(f"[{i}/{len(self._cmds)}] {c['raw']}")
+        self.part_table.setRowCount(0)
+        seen = set()
+        for c in result["commands"]:
+            args = c["args"]
+            if "flash" not in args:
+                continue
+            fi = args.index("flash")
+            img = ""
+            for a in args[fi + 1:]:
+                if a.endswith(
+                    (".img", ".img.zst", ".lz4", ".zip", ".dat",
+                     ".elf", ".melf", ".mbn", ".bin", ".fv", ".txt")
+                ):
+                    img = a
+            part = ""
+            for a in args[fi + 1:]:
+                if a.startswith("-"):
+                    continue
+                if a == img:
+                    break
+                part = a
+                break
+            if not part:
+                continue
+            if part in seen:
+                continue
+            seen.add(part)
+            self._insert_part_row(part, img)
+        self._resize_table_to_rows()
         rd = result["right_device"]
         ab = "A/B 双槽" if result["ab"] else "A-only"
         self.status.setText(
-            f"已解析刷机包（{ab}）{len(self._cmds)} 条命令"
+            f"已解析刷机包（{ab}）{len(self._cmds)} 条命令 / {len(seen)} 个分区"
             + (f"，机型: {rd}" if rd else "")
         )
         if rd and self.device_codename and rd != self.device_codename:
@@ -1350,6 +1464,10 @@ class FastbootDialog(QDialog):
                 f"此刷机包是给 {rd} 机型的，当前设备是 {self.device_codename}。\n\n"
                 "强行刷入极可能导致变砖！\n除非你确定这是通用包，否则请中止。",
             )
+
+    def _on_pkg_parse_fail(self, msg):
+        self.pkg_parse.setEnabled(True)
+        self.status.setText(f"X 解析失败: {msg}")
 
     def _resize_table_to_rows(self):
         rows = self.part_table.rowCount()
@@ -1418,6 +1536,25 @@ class FastbootDialog(QDialog):
             item.setText(path)
             item.setToolTip(path)
         # 替换浏览按钮为可再编辑（保留按钮即可，tooltip 已有路径）
+
+    def _quick_pick(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择镜像", os.path.expanduser("~/Desktop"),
+            "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
+        )
+        if path:
+            self.quick_path = path
+            self.quick_img_btn.setText(f"已选: {os.path.basename(path)}")
+            self.status.setText(f"镜像已选: {path}")
+
+    def _quick_add(self):
+        if not self.quick_path:
+            self.status.setText("请先点「选镜像…」选择镜像文件")
+            return
+        part = self.quick_combo.currentText()
+        self._insert_part_row(part, self.quick_path)
+        self._resize_table_to_rows()
+        self.status.setText(f"已加入 {part} ← {os.path.basename(self.quick_path)}")
 
 
 
@@ -1512,46 +1649,7 @@ class FastbootDialog(QDialog):
         self._resize_table_to_rows()
         self.status.setText("已添加 " + str(count) + " 个镜像")
     def _load_pkg_rows(self):
-        pkg = self.pkg_edit.text().strip()
-        if not os.path.isdir(pkg):
-            self.status.setText("请先在下方选择刷机包目录")
-            return
-        try:
-            result = self.fb.parse_package(pkg)
-        except FastbootError as e:
-            self.status.setText(f"X 解析失败: {e}")
-            return
-        self.part_table.setRowCount(0)
-        seen = set()
-        for c in result["commands"]:
-            args = c["args"]
-            if "flash" not in args:
-                continue
-            # 定位 flash 后的分区名与镜像
-            fi = args.index("flash")
-            img = ""
-            for a in args[fi + 1:]:
-                if a.endswith(
-                    (".img", ".img.zst", ".lz4", ".zip", ".dat",
-                     ".elf", ".melf", ".mbn", ".bin", ".fv", ".txt")
-                ):
-                    img = a
-            part = ""
-            for a in args[fi + 1:]:
-                if a.startswith("-"):
-                    continue
-                if a == img:
-                    break
-                part = a
-                break
-            if not part:
-                continue
-            if part in seen:
-                continue
-            seen.add(part)
-            self._insert_part_row(part, img)
-        self._resize_table_to_rows()
-        self.status.setText(f"已从刷机包载入 {len(seen)} 个分区，请勾选要刷入的分区")
+        self._start_parse()
 
     _GREEN = "QProgressBar::chunk { background-color: #4caf50; }"
     _RED = "QProgressBar::chunk { background-color: #f44336; }"
@@ -1620,6 +1718,10 @@ class FastbootDialog(QDialog):
                     cb(f"erase {w}")
                     self.fb.erase(w, line_cb=cb)
                     ui(("out", f"OK erase {w} 完成"))
+            if self.auto_reboot.isChecked():
+                cb("reboot → system")
+                self.fb.reboot(line_cb=cb)
+                ui(("out", "OK 已发送重启指令（system）"))
 
         self._worker = FastbootWorker(work, self)
         self._worker.line.connect(self._queue_out)
@@ -1632,6 +1734,47 @@ class FastbootDialog(QDialog):
         self._set_flashing(False)
         self.status.setText("OK 全部刷入完成")
 
+    def _flash_package(self):
+        if not self._cmds:
+            self.status.setText("请先在「完整包刷入」页解析刷机包")
+            return
+        wipe = self.pkg_wipe.isChecked()
+        msg = f"将完整刷入 {len(self._cmds)} 条命令。"
+        if wipe:
+            msg += "\n\n警告: 将擦除 userdata、metadata，手机上所有数据都会丢失且不可恢复！"
+        msg += "\n\n刷写中不要断开 USB！确定继续？"
+        ret = QMessageBox.warning(
+            self, "确认完整刷入", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        self.output.clear()
+        self.status.setText(f"正在完整刷入 {len(self._cmds)} 条命令...")
+        self._set_flashing(True)
+
+        def work(cb, ui):
+            def prog(i, total, raw):
+                ui(("status", f"完整刷入中 {i}/{total}"))
+                cb(raw)
+            self.fb.run_package(self._cmds, line_cb=cb, progress_cb=prog)
+            if wipe:
+                for w in ("userdata", "metadata"):
+                    cb(f"erase {w}")
+                    self.fb.erase(w, line_cb=cb)
+                    ui(("out", f"OK erase {w} 完成"))
+            if self.pkg_reboot.isChecked():
+                cb("reboot → system")
+                self.fb.reboot(line_cb=cb)
+                ui(("out", "OK 已发送重启指令（system）"))
+
+        self._worker = FastbootWorker(work, self)
+        self._worker.line.connect(self._queue_out)
+        self._worker.ui.connect(self._on_worker_ui)
+        self._worker.done.connect(self._on_flash_done)
+        self._worker.fail.connect(self._on_fail)
+        self._worker.start()
+
     def _set_flashing(self, flashing: bool):
         for w in (
             self.flash_btn,
@@ -1639,12 +1782,17 @@ class FastbootDialog(QDialog):
             self.reboot_fb_btn,
             self.part_add,
             self.part_del,
-            self.part_load,
             self.pkg_parse,
+            self.pkg_flash_btn,
             self.reboot_btn,
+            self.quick_add,
+            self.quick_img_btn,
         ):
             w.setEnabled(not flashing)
         self.part_name.setEnabled(not flashing)
+        self.auto_reboot.setEnabled(not flashing)
+        self.pkg_wipe.setEnabled(not flashing)
+        self.pkg_reboot.setEnabled(not flashing)
         self.wipe_combo.setEnabled(not flashing)
         for r in range(self.part_table.rowCount()):
             ck = self.part_table.item(r, 0)

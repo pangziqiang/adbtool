@@ -337,7 +337,7 @@ class FastbootClient:
                 return cand
         return a
 
-    def parse_package(self, pkg_dir: str) -> dict:
+    def parse_package(self, pkg_dir: str, line_cb=None) -> dict:
         rd = ""
         rd_path = os.path.join(pkg_dir, "bin", "right_device")
         if os.path.isfile(rd_path):
@@ -373,9 +373,36 @@ class FastbootClient:
                 ab = any("_ab" in a for c in cleaned for a in c["args"])
                 return {"commands": cleaned, "right_device": rd, "ab": ab, "source": "script"}
 
+        payload = self._find_payload(pkg_dir)
+        if payload:
+            out = os.path.join(pkg_dir, ".payload_extracted")
+            if not os.path.isdir(out) or not os.listdir(out):
+                from .payload_dumper import extract
+                if line_cb:
+                    line_cb("正在解包 payload.bin（全量包较大，可能耗时数分钟）...")
+                extract(payload, out, line_cb=line_cb)
+            images_dir = out
         if not os.path.isdir(images_dir):
-            raise FastbootError("刷机包目录里既没有 flash_all 脚本，也没有 images/ 目录")
+            raise FastbootError(
+                "刷机包目录里既没有 flash_all 脚本、payload.bin，也没有 images/ 目录"
+            )
+        return self._build_images_cmds(images_dir, rd)
 
+    @staticmethod
+    def _find_payload(pkg_dir: str) -> str | None:
+        for cand in (
+            os.path.join(pkg_dir, "payload.bin"),
+            os.path.join(pkg_dir, "images", "payload.bin"),
+        ):
+            if os.path.isfile(cand):
+                return cand
+        for root, _, files in os.walk(pkg_dir):
+            for f in files:
+                if f == "payload.bin":
+                    return os.path.join(root, f)
+        return None
+
+    def _build_images_cmds(self, images_dir: str, rd: str) -> dict:
         files = sorted(os.listdir(images_dir))
         ab = any(f.endswith("_ab.img") or f.endswith("_ab.img.zst") for f in files)
         parts: list[str] = []
@@ -420,6 +447,42 @@ class FastbootClient:
         if ab:
             cmds.append({"tool": "fastboot", "args": ["--set-active", "a"], "raw": "set_active a"})
         return {"commands": cmds, "right_device": rd, "ab": ab, "source": "images"}
+
+    def parse_payload(self, payload_path: str, line_cb=None) -> dict:
+        from .payload_dumper import is_payload
+        if not is_payload(payload_path):
+            raise FastbootError("不是有效的 payload.bin 文件")
+        out = os.path.join(
+            os.path.dirname(os.path.abspath(payload_path)), ".payload_extracted"
+        )
+        if not os.path.isdir(out) or not os.listdir(out):
+            from .payload_dumper import extract
+            if line_cb:
+                line_cb("正在解包 payload.bin（全量包较大，可能耗时数分钟）...")
+            extract(payload_path, out, line_cb=line_cb)
+        return self._build_images_cmds(out, "")
+
+    def parse_zip(self, zip_path: str, line_cb=None) -> dict:
+        import zipfile
+        name = os.path.basename(zip_path)
+        out = os.path.join(
+            os.path.dirname(os.path.abspath(zip_path)),
+            "." + os.path.splitext(name)[0] + "_extracted",
+        )
+        base = os.path.abspath(out)
+        if not os.path.isdir(out) or not os.listdir(out):
+            os.makedirs(out, exist_ok=True)
+            with zipfile.ZipFile(zip_path) as zf:
+                for m in zf.infolist():
+                    if m.is_dir():
+                        continue
+                    target = os.path.abspath(os.path.join(base, m.filename))
+                    if not target.startswith(base + os.sep):
+                        continue
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with zf.open(m) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+        return self.parse_package(out, line_cb=line_cb)
 
     def run_package(
         self,
