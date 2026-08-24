@@ -16,6 +16,9 @@ rm -rf "$PROJECT/build" "$APP_BUNDLE"
 "$PROJECT/venv/bin/python" setup.py py2app >/dev/null 2>&1
 [ -d "$APP_BUNDLE" ] || { echo "构建 .app 失败" >&2; exit 1; }
 
+echo "==> 1.5 裁剪冗余 Qt 模块（qml/3D/多媒体等）"
+"$PROJECT/scripts/trim_app.sh" "$APP_BUNDLE"
+
 echo "==> 2/2 制作 .dmg（含 Applications 快捷入口）"
 mkdir -p "$STAGE"
 cp -R "$APP_BUNDLE" "$STAGE/"

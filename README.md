@@ -116,6 +116,12 @@ Applications 即可安装。首次运行时如系统提示「无法验证开发�
 
 > 检测构建机架构：`uname -m`（x86_64 = Intel / Rosetta，arm64 = Apple Silicon）。
 
+### 体积优化
+
+打包后会自动执行 `scripts/trim_app.sh`，裁掉用不到的 QML / QtQuick3D / 多媒体等
+冗余 Qt 模块（只保留 Widgets 栈），最终 dmg 通常从 ~90MB 降到 ~37MB。裁剪后
+`codesign` 重新 ad-hoc 签名，不影响启动。
+
 ## 说明
 
 - 文件删除不可恢复，请谨慎操作。
