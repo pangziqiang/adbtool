@@ -1044,6 +1044,32 @@ _PARTITIONS = [
     "super",
 ]
 
+_QUICK_PARTITIONS = [
+    "boot",
+    "init_boot",
+    "recovery",
+    "vendor_boot",
+    "dtbo",
+    "vbmeta",
+    "vbmeta_system",
+    "vbmeta_vendor",
+    "modem",
+    "system",
+    "vendor",
+    "super",
+]
+
+
+def _quick_partition_names() -> list[str]:
+    """常用分区名；A/B 分区补全 _a / _b 双槽，保证下拉列表完整。"""
+    names: list[str] = []
+    for p in _QUICK_PARTITIONS:
+        names.append(p)
+        if f"{p}_a" in _PARTITIONS:
+            names.append(f"{p}_a")
+            names.append(f"{p}_b")
+    return names
+
 
 class FastbootDialog(QDialog):
     def __init__(self, adb: AdbClient, parent=None):
@@ -1108,25 +1134,7 @@ class FastbootDialog(QDialog):
         grp_q = QHBoxLayout()
         grp_q.addWidget(QLabel("快捷刷入", tab_part))
         self.quick_combo = QComboBox(tab_part)
-        self.quick_combo.addItems(
-            [
-                "boot",
-                "boot_a",
-                "boot_b",
-                "init_boot",
-                "init_boot_a",
-                "recovery",
-                "vendor_boot",
-                "vendor_boot_a",
-                "dtbo",
-                "vbmeta",
-                "vbmeta_system",
-                "modem",
-                "system",
-                "vendor",
-                "super",
-            ]
-        )
+        self.quick_combo.addItems(_quick_partition_names())
         self.quick_combo.setToolTip("选择要刷入的常用分区")
         self.quick_img_btn = QPushButton("选镜像…", tab_part)
         self.quick_img_btn.clicked.connect(self._quick_pick)
@@ -1236,33 +1244,25 @@ class FastbootDialog(QDialog):
         vk.addLayout(grp_pkg)
         self.tabs.addTab(tab_pkg, "完整包刷入")
 
-        # ---- 标签③：设备与重启 ----
-        tab_dev = QWidget(self)
-        vd = QVBoxLayout(tab_dev)
-        dev_hint = QLabel("设备维护操作：重启到指定模式、继续开机引导。", tab_dev)
-        dev_hint.setStyleSheet("color:#888;")
-        vd.addWidget(dev_hint)
-        grp3 = QHBoxLayout()
-        self.reboot_combo = QComboBox(tab_dev)
-        self.reboot_combo.addItems(
-            ["重启到系统", "重启到 Recovery", "重启到 FastbootD", "重启回 Bootloader", "继续启动(continue)"]
-        )
-        self.reboot_btn = QPushButton("执行重启", tab_dev)
-        self.reboot_btn.clicked.connect(self._fb_reboot)
-        grp3.addWidget(QLabel("重启", tab_dev))
-        grp3.addWidget(self.reboot_combo, 1)
-        grp3.addWidget(self.reboot_btn)
-        vd.addLayout(grp3)
-        vd.addStretch(1)
-        self.tabs.addTab(tab_dev, "设备与重启")
-
-        # 底部固定：输出区 + 状态
+        # 底部共享条：输出区 + 设备与重启（分区刷入 / 完整包刷入 共用，位于右下角）
         self.output = QListWidget(self)
         self.output.setStyleSheet("QListWidget::item { font-family: Menlo; font-size: 11px; }")
         lay.addWidget(self.output, 1)
 
+        bottom = QHBoxLayout()
         self.status = QLabel("", self)
-        lay.addWidget(self.status)
+        bottom.addWidget(self.status, 1)
+        bottom.addStretch(1)
+        bottom.addWidget(QLabel("重启", self))
+        self.reboot_combo = QComboBox(self)
+        self.reboot_combo.addItems(
+            ["重启到系统", "重启到 Recovery", "重启到 FastbootD", "重启回 Bootloader", "继续启动(continue)"]
+        )
+        self.reboot_btn = QPushButton("执行重启", self)
+        self.reboot_btn.clicked.connect(self._fb_reboot)
+        bottom.addWidget(self.reboot_combo)
+        bottom.addWidget(self.reboot_btn)
+        lay.addLayout(bottom)
         self._refresh()
 
     def _refresh(self):
