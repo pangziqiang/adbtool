@@ -154,6 +154,16 @@ class MainWindow(QMainWindow):
         self._init_local_panel()
         self._refresh_devices()
 
+    def closeEvent(self, ev):
+        # 关闭窗口时先停掉后台线程，避免 "QThread: Destroyed while thread is still running" 崩溃
+        for w in (self._worker, self._device_worker):
+            if w and w.isRunning():
+                w.wait(1500)
+                if w.isRunning():
+                    w.terminate()
+                    w.wait(1000)
+        super().closeEvent(ev)
+
     def _create_adb(self) -> AdbClient:
         try:
             return AdbClient()
