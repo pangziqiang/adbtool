@@ -82,8 +82,25 @@ src/adbtool/
   env_check.py        ADB 环境检测与自动下载
   main.py             程序入口
 tests/                单元测试
-scripts/              辅助脚本（生成 .app）
+scripts/              辅助脚本（生成 .app/.dmg）
 ```
+
+## 打包（生成 .dmg）
+
+需要本机已装好依赖（venv 内已有 PyQt6、py2app）：
+
+```sh
+make dmg        # 或 scripts/make_app.sh
+```
+
+流程：`py2app` 把 Python + PyQt6 + 代码打成自包含的 `dist/ADB Tool.app`，
+再用 `hdiutil` 生成 `dist/ADB Tool-<版本>.dmg`。双击 dmg，把图标拖到
+Applications 即可安装。首次运行时如系统提示「无法验证开发者」，右键打开或
+在「系统设置 → 隐私与安全性」里允许。
+
+> 说明：adb/fastboot 不随包内置，运行时会自动下载到 `~/Library/Android/sdk`
+> （或读取已安装的 platform-tools）；`scrcpy`、`magiskboot`、`ffmpeg` 等按需
+> 命令仍需在系统里另行安装。
 
 ## 说明
 

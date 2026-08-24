@@ -6,3 +6,9 @@ test:
 
 lint:
 	venv/bin/python -m ruff check src tests
+
+app:
+	scripts/make_app.sh
+
+dmg:
+	scripts/make_app.sh
