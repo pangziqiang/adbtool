@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from . import payload_dumper
+from . import offline_patch, payload_dumper
 from .adb_client import AdbClient, AdbError
 from .fastboot_client import FastbootClient, FastbootError
 
@@ -1977,7 +1977,7 @@ class FastbootDialog(QDialog):
 
 
 class OfflinePatchDialog(QDialog):
-    """脱机修补：Magisk 修补 / 制作 GKI 镜像 / SK-ROOT。"""
+    """脱机修补：Magisk 修补 / 制作 GKI 镜像 / 内核级 Root。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2081,27 +2081,46 @@ class OfflinePatchDialog(QDialog):
         vg.addStretch(1)
         self.tabs.addTab(tab_gki, "制作 GKI 镜像")
 
-        # ---- SK-ROOT ----
-        tab_sk = QWidget(self)
-        vs = QVBoxLayout(tab_sk)
-        fs = QFormLayout()
-        rows = QHBoxLayout()
-        self.sk_boot = QLineEdit(tab_sk)
-        bs = QPushButton("选择 boot.img…", tab_sk)
-        bs.clicked.connect(lambda: self._pick_file(self.sk_boot, "boot", "镜像 (*.img)"))
-        rows.addWidget(self.sk_boot, 1)
-        rows.addWidget(bs)
-        fs.addRow("boot 路径", rows)
-        vs.addLayout(fs)
-        self.sk_btn = QPushButton("开始修补", tab_sk)
-        self.sk_btn.clicked.connect(self._sk_patch)
-        vs.addWidget(self.sk_btn)
-        note = QLabel("SK-ROOT 为厂商（三星 KNOX）私有方案，通用实现尚不支持。", tab_sk)
-        note.setWordWrap(True)
-        note.setStyleSheet("color:#c00;")
-        vs.addWidget(note)
-        vs.addStretch(1)
-        self.tabs.addTab(tab_sk, "SK-ROOT 一键修补")
+        # ---- KernelSU / SukiSU 内核级 Root ----
+        tab_ks = QWidget(self)
+        vk = QVBoxLayout(tab_ks)
+        fk = QFormLayout()
+        rowb2 = QHBoxLayout()
+        self.ks_boot = QLineEdit(tab_ks)
+        bb2 = QPushButton("选择 boot/init_boot…", tab_ks)
+        bb2.clicked.connect(lambda: self._pick_file(self.ks_boot, "boot/init_boot", "镜像 (*.img)"))
+        rowb2.addWidget(self.ks_boot, 1)
+        rowb2.addWidget(bb2)
+        fk.addRow("修补镜像", rowb2)
+        self.ks_method = QComboBox(tab_ks)
+        self.ks_method.addItems(list(offline_patch.KSU_METHODS))
+        fk.addRow("方案", self.ks_method)
+        self.ks_kmi = QComboBox(tab_ks)
+        self.ks_kmi.addItem("自动检测")
+        self.ks_kmi.addItems(list(offline_patch.KMI_CHOICES))
+        fk.addRow("KMI（Android/内核）", self.ks_kmi)
+        vk.addLayout(fk)
+        note_ks = QLabel(
+            "内核级 Root：KernelSU/Next 用内置内核模块；SukiSU 需联网下载对应 KMI 的模块。"
+            "产物用 fastboot 刷入 init_boot/boot。",
+            tab_ks,
+        )
+        note_ks.setWordWrap(True)
+        note_ks.setStyleSheet("color:#888;")
+        vk.addWidget(note_ks)
+        rowk = QHBoxLayout()
+        self.ks_out = QLineEdit(tab_ks)
+        bk = QPushButton("输出目录…", tab_ks)
+        bk.clicked.connect(lambda: self._set_outdir(self.ks_out))
+        rowk.addWidget(QLabel("输出目录", tab_ks))
+        rowk.addWidget(self.ks_out, 1)
+        rowk.addWidget(bk)
+        vk.addLayout(rowk)
+        self.ks_btn = QPushButton("开始修补", tab_ks)
+        self.ks_btn.clicked.connect(self._ksud_patch)
+        vk.addWidget(self.ks_btn)
+        vk.addStretch(1)
+        self.tabs.addTab(tab_ks, "KernelSU / SukiSU")
 
         # 共享日志
         self.log = QListWidget(self)
@@ -2195,18 +2214,20 @@ class OfflinePatchDialog(QDialog):
 
         self._run(work, lambda p: self._log(f"OK 制作完成: {p}"), self.gki_btn)
 
-    # ---------- SK-ROOT ----------
-    def _sk_patch(self):
-        from . import offline_patch
-
-        boot = self.sk_boot.text().strip()
+    # ---------- KernelSU / SukiSU ----------
+    def _ksud_patch(self):
+        boot = self.ks_boot.text().strip()
         if not os.path.isfile(boot):
-            self._log("请选择 boot.img")
+            self._log("请选择 boot/init_boot 镜像")
             return
-        out = self._default_out(None)
+        method = self.ks_method.currentText()
+        kmi = self.ks_kmi.currentText()
+        if kmi == "自动检测":
+            kmi = ""
+        out = self._default_out(self.ks_out)
 
         def work(cb, ui):
-            cb("开始 SK-ROOT 修补...")
-            return offline_patch.patch_skroot(boot, out, line_cb=cb)
+            cb(f"开始 {method} 修补...")
+            return offline_patch.patch_ksud(boot, method, out, kmi=kmi or None, line_cb=cb)
 
-        self._run(work, lambda p: self._log(f"OK 修补完成: {p}"), self.sk_btn)
+        self._run(work, lambda p: self._log(f"OK 修补完成: {p}"), self.ks_btn)

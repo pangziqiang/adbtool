@@ -15,7 +15,6 @@ from adbtool.offline_patch import (
     is_boot_image,
     is_magisk_apk,
     patch_magisk,
-    patch_skroot,
 )
 
 
@@ -130,10 +129,6 @@ class TestOfflinePatch(unittest.TestCase):
             with open(dst, "rb") as f:
                 self.assertEqual(f.read(), b"patched")
 
-    def test_patch_skroot_unsupported(self):
-        with tempfile.TemporaryDirectory() as td, self.assertRaises(PatchError):
-            patch_skroot(os.path.join(td, "boot.img"), os.path.join(td, "out"))
-
     def test_build_gki(self):
         with tempfile.TemporaryDirectory() as td:
             boot = os.path.join(td, "boot.img")
@@ -178,5 +173,124 @@ class TestOfflinePatch(unittest.TestCase):
                 build_gki(boot, ak3, os.path.join(td, "out"))
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestKsudPatch(unittest.TestCase):
+    def _patch_run_creator(self, out_dir):
+        def fake_run(cmd, **kw):
+            out_name = cmd[cmd.index("--out_name") + 1]
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, out_name), "wb") as f:
+                f.write(b"patched")
+            return mock.Mock(returncode=0, stdout="Done!\n", stderr="")
+
+        return fake_run
+
+    def test_patch_ksud_kernelsu(self):
+        with tempfile.TemporaryDirectory() as td:
+            boot = os.path.join(td, "init_boot.img")
+            _make_boot(boot)
+            out = os.path.join(td, "out")
+            with (
+                mock.patch.object(offline_patch, "ensure_ksud", return_value="/x/ksud"),
+                mock.patch.object(offline_patch.subprocess, "run") as run,
+            ):
+                run.side_effect = self._patch_run_creator(out)
+                dst = offline_patch.patch_ksud(boot, "KernelSU-Next", out, kmi="android14-6.1")
+            args = run.call_args[0][0]
+            self.assertIn("boot-patch", args)
+            self.assertIn("-b", args)
+            self.assertIn("--kmi", args)
+            self.assertNotIn("--module", args)
+            self.assertTrue(os.path.isfile(dst))
+
+    def test_patch_ksud_sukisu_module(self):
+        with tempfile.TemporaryDirectory() as td:
+            boot = os.path.join(td, "boot.img")
+            _make_boot(boot)
+            out = os.path.join(td, "out")
+            with (
+                mock.patch.object(offline_patch, "ensure_ksud", return_value="/x/ksud"),
+                mock.patch.object(offline_patch, "ensure_sukisu_ko", return_value="/x/android14-6.1.ko"),
+                mock.patch.object(offline_patch.subprocess, "run") as run,
+            ):
+                run.side_effect = self._patch_run_creator(out)
+                offline_patch.patch_ksud(boot, "SukiSU", out, kmi="android14-6.1")
+            args = run.call_args[0][0]
+            self.assertIn("--module", args)
+            self.assertEqual(args[args.index("--module") + 1], "/x/android14-6.1.ko")
+            self.assertIn("--kmi", args)
+
+    def test_patch_ksud_sukisu_requires_kmi(self):
+        with tempfile.TemporaryDirectory() as td:
+            boot = os.path.join(td, "boot.img")
+            _make_boot(boot)
+            with (
+                mock.patch.object(offline_patch, "ensure_ksud", return_value="/x/ksud"),
+                self.assertRaises(PatchError),
+            ):
+                offline_patch.patch_ksud(boot, "SukiSU", os.path.join(td, "out"))
+
+    def test_patch_ksud_bad_method(self):
+        with tempfile.TemporaryDirectory() as td:
+            boot = os.path.join(td, "boot.img")
+            _make_boot(boot)
+            with self.assertRaises(PatchError):
+                offline_patch.patch_ksud(boot, "Xyz", os.path.join(td, "out"))
+
+    def test_patch_ksud_bad_boot(self):
+        with tempfile.TemporaryDirectory() as td:
+            bad = os.path.join(td, "bad.img")
+            with open(bad, "wb") as f:
+                f.write(b"not boot")
+            with self.assertRaises(PatchError):
+                offline_patch.patch_ksud(bad, "KernelSU", os.path.join(td, "out"))
+
+    def test_patch_ksud_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            boot = os.path.join(td, "boot.img")
+            _make_boot(boot)
+            with (
+                mock.patch.object(offline_patch, "ensure_ksud", return_value="/x/ksud"),
+                mock.patch.object(
+                    offline_patch.subprocess,
+                    "run",
+                    return_value=mock.Mock(returncode=1, stdout="error", stderr=""),
+                ),
+                self.assertRaises(PatchError),
+            ):
+                offline_patch.patch_ksud(boot, "KernelSU", os.path.join(td, "out"))
+
+    def test_ensure_sukisu_ko_bad_kmi(self):
+        with self.assertRaises(PatchError):
+            offline_patch.ensure_sukisu_ko("bogus")
+
+    def test_ensure_ksud_cached(self):
+        with tempfile.TemporaryDirectory() as td:
+            exe = os.path.join(td, "ksud")
+            with open(exe, "wb") as f:
+                f.write(b"elf")
+            os.chmod(exe, 0o755)
+            with (
+                mock.patch.object(offline_patch, "_SDK_DIR", td),
+                mock.patch.object(offline_patch, "_download_to") as dl,
+            ):
+                got = offline_patch.ensure_ksud()
+            self.assertEqual(got, exe)
+            dl.assert_not_called()
+
+    def test_ensure_ksud_downloads(self):
+        with tempfile.TemporaryDirectory() as td:
+            with (
+                mock.patch.object(offline_patch, "_SDK_DIR", td),
+                mock.patch.object(offline_patch, "_mac_arch", return_value="aarch64"),
+                mock.patch.object(offline_patch, "_download_to") as dl,
+                mock.patch.object(offline_patch, "_remove_quarantine"),
+            ):
+
+                def fake_dl(url, dest, line_cb=None):
+                    with open(dest, "wb") as f:
+                        f.write(b"elf")
+
+                dl.side_effect = fake_dl
+                got = offline_patch.ensure_ksud()
+            self.assertEqual(got, os.path.join(td, "ksud"))
+            self.assertTrue(os.access(got, os.X_OK))

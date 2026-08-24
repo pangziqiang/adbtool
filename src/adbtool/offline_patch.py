@@ -1,4 +1,4 @@
-"""脱机修补：Magisk 修补 / 制作 GKI 镜像 / SK-ROOT。
+"""脱机修补：Magisk 修补 / 制作 GKI 镜像 / 内核级 Root。
 
 Magisk 修补流程（参照官方 boot_patch.sh）：
 1. 解包 Magisk APK 的 assets 脚本 + lib/<abi> 下的 so 二进制；
@@ -7,15 +7,16 @@ Magisk 修补流程（参照官方 boot_patch.sh）：
 4. 以脚本目录为工作目录运行 `sh boot_patch.sh <绝对路径 boot.img>`，产物为 new-boot.img。
 
 制作 GKI 镜像：用 AnyKernel3（AK3）内的内核替换 boot.img 的内核后重新打包。
-SK-ROOT 为厂商（三星 KNOX）私有方案，通用实现尚不支持。
 """
 
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 import zipfile
 from typing import Callable
 
@@ -244,17 +245,150 @@ def build_gki(
         shutil.rmtree(work, ignore_errors=True)
 
 
-def patch_skroot(
+# ---------------------------------------------------------------------------
+# 内核级 Root：KernelSU / KernelSU-Next / SukiSU
+#
+# 采用 KernelSU-Next 发布的 macOS 桌面版 ksud 打补丁（官方 KernelSU/SukiSU
+# release 不含桌面 ksud）。该 ksud 内嵌 boot 解析能力（无需 magiskboot），并
+# 内嵌各 KMI 的 *_kernelsu.ko 与 ksuinit；SukiSU 需单独下载其内核模块并用
+# --module 覆盖。
+# 桌面 ksud boot-patch 命令：ksud boot-patch -b <boot> [--kmi <KMI>]
+#   [--module <sukisu.ko>] --out <dir> --out_name <name>
+# ---------------------------------------------------------------------------
+
+_KSU_NEXT_REPO = "KernelSU-Next/KernelSU-Next"
+_KSU_NEXT_TAG = "v3.3.0"
+_SUKISU_REPO = "SukiSU-Ultra/SukiSU-Ultra"
+_SUKISU_TAG = "v4.1.3"
+_SDK_DIR = os.path.expanduser("~/Library/Android/sdk")
+
+KSU_METHODS = ("KernelSU", "KernelSU-Next", "SukiSU")
+KMI_CHOICES = (
+    "android12-5.10",
+    "android13-5.10",
+    "android13-5.15",
+    "android14-5.15",
+    "android14-6.1",
+    "android15-6.6",
+    "android16-6.12",
+)
+
+
+def _mac_arch() -> str:
+    machine = platform.machine().lower()
+    return "aarch64" if machine in ("arm64", "aarch64") else "x86_64"
+
+
+def _download_to(url: str, dest: str, line_cb: Callable[[str], None] | None = None) -> None:
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if line_cb:
+        line_cb(f"下载中: {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": "adbtool/0.1"})
+    with urllib.request.urlopen(req, timeout=120) as resp, open(dest, "wb") as f:
+        shutil.copyfileobj(resp, f)
+
+
+def _remove_quarantine(path: str) -> None:
+    try:
+        subprocess.run(
+            ["xattr", "-d", "com.apple.quarantine", path],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except OSError:
+        pass
+
+
+def ensure_ksud(line_cb: Callable[[str], None] | None = None) -> str:
+    """确保存在可运行的桌面 ksud，返回其路径。"""
+    os.makedirs(_SDK_DIR, exist_ok=True)
+    exe = os.path.join(_SDK_DIR, "ksud")
+    if os.path.isfile(exe) and os.access(exe, os.X_OK):
+        return exe
+    url = f"https://github.com/{_KSU_NEXT_REPO}/releases/download/{_KSU_NEXT_TAG}/ksud-{_mac_arch()}-apple-darwin"
+    tmp = exe + ".download"
+    try:
+        if line_cb:
+            line_cb(f"下载 ksud（KernelSU-Next {_KSU_NEXT_TAG}，{_mac_arch()}）...")
+        _download_to(url, tmp, line_cb)
+        os.chmod(tmp, 0o755)
+        _remove_quarantine(tmp)
+        os.replace(tmp, exe)
+        return exe
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise PatchError(f"下载 ksud 失败: {e}") from None
+
+
+def ensure_sukisu_ko(kmi: str, line_cb: Callable[[str], None] | None = None) -> str:
+    """下载指定 KMI 的 SukiSU 内核模块，返回其路径（已缓存）。"""
+    if kmi not in KMI_CHOICES:
+        raise PatchError(f"无效的 KMI: {kmi}（支持: {'、'.join(KMI_CHOICES)}）")
+    os.makedirs(_SDK_DIR, exist_ok=True)
+    dest = os.path.join(_SDK_DIR, f"sukisu-{kmi}.ko")
+    if os.path.isfile(dest):
+        return dest
+    url = f"https://github.com/{_SUKISU_REPO}/releases/download/{_SUKISU_TAG}/{kmi}_kernelsu.ko"
+    tmp = dest + ".download"
+    try:
+        if line_cb:
+            line_cb(f"下载 SukiSU 内核模块（{kmi}）...")
+        _download_to(url, tmp, line_cb)
+        os.replace(tmp, dest)
+        return dest
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise PatchError(f"下载 SukiSU 内核模块失败: {e}") from None
+
+
+def patch_ksud(
     boot_img: str,
+    method: str,
     out_dir: str,
+    kmi: str | None = None,
     line_cb: Callable[[str], None] | None = None,
 ) -> str:
-    """SK-ROOT 一键修补。
+    """用 ksud 对 boot/init_boot 打内核级 Root 补丁，返回修补后镜像路径。"""
+    method = (method or "KernelSU").strip()
+    if method not in KSU_METHODS:
+        raise PatchError(f"不支持的方案: {method}（支持: {'、'.join(KSU_METHODS)}）")
+    if not is_boot_image(boot_img):
+        raise PatchError("不是有效的 boot/init_boot 镜像（缺少 ANDROID! 魔数）")
+    ksud = ensure_ksud(line_cb)
 
-    SK-ROOT 是厂商（三星 KNOX）私有的一键 Root 方案，需按具体机型/密钥做内核签名替换，
-    通用实现无法保证正确，因此这里明确拒绝，避免生成损坏镜像。
-    """
-    raise PatchError(
-        "SK-ROOT 为厂商（三星 KNOX）私有方案，需要按具体机型的密钥做内核签名替换，"
-        "通用实现尚不支持，建议改用 Magisk 修补。"
-    )
+    args = [ksud, "boot-patch", "-b", boot_img]
+    if kmi:
+        if kmi not in KMI_CHOICES:
+            raise PatchError(f"无效的 KMI: {kmi}")
+        args += ["--kmi", kmi]
+    if method == "SukiSU":
+        if not kmi:
+            raise PatchError("SukiSU 修补必须选择 KMI（Android/内核版本）")
+        args += ["--module", ensure_sukisu_ko(kmi, line_cb)]
+
+    os.makedirs(out_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(boot_img))[0]
+    out_name = f"{base}-{method.lower().replace(' ', '-')}-patched.img"
+    args += ["--out", out_dir, "--out_name", out_name]
+    if line_cb:
+        line_cb("运行: " + " ".join(args))
+    proc = subprocess.run(args, capture_output=True, text=True, timeout=1800, check=False)
+    if line_cb:
+        for l in (proc.stdout or "").splitlines():
+            line_cb(l)
+        for l in (proc.stderr or "").splitlines():
+            line_cb(l)
+    dst = os.path.join(out_dir, out_name)
+    if proc.returncode != 0:
+        tail = ((proc.stdout or "") + (proc.stderr or "")).strip().splitlines()[-5:]
+        raise PatchError("ksud 修补失败: " + " | ".join(tail))
+    if not os.path.isfile(dst):
+        raise PatchError("修补后未找到产物镜像")
+    return dst
