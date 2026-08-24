@@ -102,6 +102,20 @@ Applications 即可安装。首次运行时如系统提示「无法验证开发�
 > （或读取已安装的 platform-tools）；`scrcpy`、`magiskboot`、`ffmpeg` 等按需
 > 命令仍需在系统里另行安装。
 
+### 架构说明（Intel / Apple Silicon）
+
+- 打包脚本会把**可执行文件和 Python 运行时**合成 universal（x86_64 + arm64）
+  双切片，但 **PyQt6 的 Qt 运行库取决于构建机器的架构**，不会跨架构合成。
+- 因此最终 dmg 的可用性由**构建机器**决定：
+  - 在 **Intel Mac** 上 `make dmg`：产物在 Intel 上原生运行；在 Apple Silicon
+    （M 系列）上需安装 **Rosetta 2** 转译运行，不是原生 arm64。
+  - 在 **Apple Silicon Mac** 上 `make dmg`：产物在 M 系列上原生运行；在
+    Intel 上无法运行。
+- 要一份**同时在 Intel 与 M 系列原生运行**的 dmg，需分别在两台机器上构建，再用
+  `lipo` 合并双切片（一般工具类 app 不必如此，M 系列装 Rosetta 2 即可）。
+
+> 检测构建机架构：`uname -m`（x86_64 = Intel / Rosetta，arm64 = Apple Silicon）。
+
 ## 说明
 
 - 文件删除不可恢复，请谨慎操作。
