@@ -7,10 +7,12 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from typing import Final
 
 from PyQt6.QtCore import QPointF, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import (
@@ -21,9 +23,7 @@ from PyQt6.QtGui import (
     QPixmap,
     QStandardItem,
     QStandardItemModel,
-    QTextCursor,
 )
-from PyQt6.QtWidgets import QStyle
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -41,9 +41,9 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -179,6 +179,7 @@ def _parse_apk(aapt: str, apk: str) -> tuple[str, bytes]:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
         for line in proc.stdout.splitlines():
             if line.startswith("application-label:") and not label:
@@ -212,15 +213,15 @@ def _parse_apk(aapt: str, apk: str) -> tuple[str, bytes]:
             best = (0, b"")
             for n in z.namelist():
                 low = n.lower()
-                if not (low.endswith(".png") or low.endswith(".webp")) or n.endswith(".9.png"):
+                if not low.endswith((".png", ".webp")) or n.endswith(".9.png"):
                     continue
                 try:
                     data = z.read(n)
-                    if data[:4] == b"\x89PNG" or (
-                        data[:4] == b"RIFF" and data[8:12] == b"WEBP"
-                    ):
-                        if len(data) > best[0]:
-                            best = (len(data), data)
+                    if (
+                        data[:4] == b"\x89PNG"
+                        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+                    ) and len(data) > best[0]:
+                        best = (len(data), data)
                 except Exception:
                     continue
             if best[1]:
@@ -243,6 +244,7 @@ class EnrichWorker(QThread):
         self.packages = packages
         self.system_only = system_only
         self._stop = False
+        self._adb_lock = threading.Lock()
 
     def _cache_dir(self) -> str:
         safe = re.sub(r"[^\w.-]", "_", self.adb.device)
@@ -296,7 +298,8 @@ class EnrichWorker(QThread):
         icon_f = os.path.join(cdir, pkg + ".png")
         if os.path.isfile(label_f):
             try:
-                label = open(label_f, encoding="utf-8").read().strip()
+                with open(label_f, encoding="utf-8") as f:
+                    label = f.read().strip()
             except OSError:
                 label = ""
             icn = b""
@@ -311,10 +314,11 @@ class EnrichWorker(QThread):
         label, icn = pkg, b""
         if apk:
             try:
-                size_s = self.adb._run(
-                    ["shell", f"stat -c %s {shlex.quote(apk)}"],
-                    check=False,
-                ).strip()
+                with self._adb_lock:
+                    size_s = self.adb._run(
+                        ["shell", f"stat -c %s {shlex.quote(apk)}"],
+                        check=False,
+                    ).strip()
                 if size_s.isdigit() and int(size_s) > _APK_SIZE_LIMIT:
                     apk = ""
             except Exception:
@@ -324,7 +328,8 @@ class EnrichWorker(QThread):
                 tmpdir, hashlib.md5(pkg.encode()).hexdigest() + ".apk"
             )
             try:
-                self.adb._run(["pull", apk, tmp], timeout=300)
+                with self._adb_lock:
+                    self.adb._run_transfer(["pull", apk, tmp])
                 label, icn = _parse_apk(aapt, tmp)
             except Exception:
                 pass
@@ -607,12 +612,12 @@ class LogcatReader(QThread):
 
 
 class LogcatDialog(QDialog):
-    _LV_ORDER = {"V": 0, "D": 1, "I": 2, "W": 3, "E": 4}
+    _LV_ORDER: Final = {"V": 0, "D": 1, "I": 2, "W": 3, "E": 4}
     _TIME_RE = re.compile(
         r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\s+"
         r"(\d+)\s+(\d+)\s+([VDIWEF])\s+(\S+):\s?(.*)$"
     )
-    _LV_COLOR = {
+    _LV_COLOR: Final = {
         "E": "#e53935",
         "W": "#fb8c00",
         "I": "#1e88e5",
@@ -704,7 +709,7 @@ class LogcatDialog(QDialog):
         self.tag.addItem("全部标签")
         self.tag.addItems(tags)
         idx = self.tag.findText(cur)
-        self.tag.setCurrentIndex(idx if idx >= 0 else 0)
+        self.tag.setCurrentIndex(max(idx, 0))
         self.tag.blockSignals(False)
         self.status.setText(f"已抓取 {count} 行（共 {len(self._rows)} 条）")
         self._apply_filter()
@@ -842,6 +847,7 @@ class RecordDialog(QDialog):
                 capture_output=True,
                 text=True,
                 timeout=180,
+                check=False,
             )
             if proc.returncode == 0 and os.path.getsize(tmp) > 0:
                 os.replace(tmp, dest)
@@ -1024,7 +1030,7 @@ QCheckBox::indicator:unchecked {{ image: url("{off_img}"); }}"""
         )
 
     def _apply_scale(self):
-        self.status.setText(f"正在设置动画缩放...")
+        self.status.setText("正在设置动画缩放...")
         self._t = AdbTask(
             lambda: self.adb.set_anim_scale(self.scale.value()), (), self
         )
@@ -1642,8 +1648,7 @@ class FastbootDialog(QDialog):
                     part = part[:-len(suffix)]
                     break
             for prefix in ("image-", "flash_"):
-                if part.startswith(prefix):
-                    part = part[len(prefix):]
+                part = part.removeprefix(prefix)
             self._insert_part_row(part, f)
             count += 1
         self._resize_table_to_rows()

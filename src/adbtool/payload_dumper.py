@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -8,24 +9,39 @@ import tarfile
 import urllib.request
 from typing import Callable
 
-
 _REPO = "ssut/payload-dumper-go"
 _VERSION = "2.0.2"
 _SDK_DIR = os.path.expanduser("~/Library/Android/sdk")
 _TOOL_NAME = "payload-dumper-go"
+_SHA256 = {
+    "amd64": "bed075dd489d8b102c9d6acd77e7a3015972073f85faedc906218e1873070bd4",
+    "arm64": "05d908e0dc083f668a8b35dd511d096dc14b219842a64c92b94f7a38383fedfe",
+}
 
 
 class PayloadError(Exception):
     pass
 
 
-def _release_url() -> str:
+def _arch() -> str:
     machine = platform.machine().lower()
-    arch = "arm64" if machine in ("arm64", "aarch64") else "amd64"
+    return "arm64" if machine in ("arm64", "aarch64") else "amd64"
+
+
+def _release_url() -> str:
+    arch = _arch()
     return (
         f"https://github.com/{_REPO}/releases/download/{_VERSION}/"
         f"payload-dumper-go_{_VERSION}_darwin_{arch}.tar.gz"
     )
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _installed_path() -> str | None:
@@ -56,6 +72,7 @@ def _remove_quarantine(path: str) -> None:
             ["xattr", "-d", "com.apple.quarantine", path],
             capture_output=True,
             timeout=10,
+            check=False,
         )
     except OSError:
         pass
@@ -73,6 +90,9 @@ def ensure_payload_dumper(progress: Callable[[str], None] | None = None) -> str:
     tgz = os.path.join(_SDK_DIR, "payload-dumper-go.tar.gz")
     try:
         _download(url, tgz)
+        expected = _SHA256.get(_arch())
+        if expected and _sha256_file(tgz) != expected:
+            raise PayloadError("下载校验失败：SHA-256 与官方发布不一致")
         with tarfile.open(tgz, "r:gz") as tf:
             for m in tf.getmembers():
                 if m.isfile() and m.name.endswith(_TOOL_NAME):
@@ -109,6 +129,7 @@ def list_partitions(payload_path: str) -> list[str]:
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
     if proc.returncode != 0:
         raise PayloadError(proc.stderr.strip() or "列出 payload 分区失败")

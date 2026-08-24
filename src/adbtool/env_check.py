@@ -47,6 +47,7 @@ def download_adb(progress=None) -> str:
                     ["xattr", "-d", "com.apple.quarantine", adb],
                     capture_output=True,
                     timeout=10,
+                    check=False,
                 )
             except OSError:
                 pass

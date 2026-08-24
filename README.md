@@ -33,8 +33,12 @@ macOS 下通过 ADB 连接安卓手机的综合工具箱。
 
 ### Fastboot 刷机
 - 自动检测 fastboot 设备
-- 刷机包解析与分区刷写
-- 单分区 / 完整包刷写，支持保留数据或清除数据模式
+- 单分区镜像刷写（`boot` / `recovery` / `vbmeta` / `super` 等）
+- 完整包刷入：解析并刷写包内所有镜像，A/B 设备自动刷双槽并 `set_active`
+- 支持普通分区镜像包与 `flash-all` 脚本，自动识别分区、去重、附加 `super`/`cust` 等
+- 支持 `payload.bin` 全量包（`update_engine` 格式）自动解包后刷写
+- 支持 `.img.zst` 压缩镜像，自动用 `zstd` 解压（未安装时提示 `brew install zstd`）
+- 保留数据 / 清除数据两种刷写模式
 - 刷机进度可视化
 
 ## 环境要求
@@ -71,6 +75,7 @@ make test
 src/adbtool/
   adb_client.py      ADB 命令封装（设备管理、文件操作、截屏、系统控制）
   fastboot_client.py  Fastboot 命令封装（刷机、getvar、erase）
+  payload_dumper.py   payload.bin 解包（下载并校验 payload-dumper-go）
   file_panel.py       可复用的文件面板（本地/手机通用，列表/宫格视图）
   tools.py            工具对话框（配对、应用管理、logcat、录屏、系统开关、刷机）
   main_window.py      主窗口 + 后台传输线程

@@ -14,3 +14,11 @@ adbtool = "adbtool.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+# 本工具是本地 GUI，故意吞掉异常的降级路径属于预期行为，且时区固定为本地。
+ignore = ["BLE001", "S110", "S112", "DTZ005", "DTZ006", "EXE002"]

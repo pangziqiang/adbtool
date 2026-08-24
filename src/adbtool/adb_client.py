@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import PurePosixPath
 
 
@@ -86,7 +85,7 @@ class AdbClient:
         cmd += args
         try:
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout
+                cmd, capture_output=True, text=True, timeout=timeout, check=False
             )
         except subprocess.TimeoutExpired:
             raise AdbError(f"adb 命令超时: {' '.join(cmd[1:3])}") from None
@@ -179,10 +178,12 @@ class AdbClient:
             while True:
                 if proc.poll() is not None:
                     break
-                if time.time() - start > total_timeout:
+                remaining = total_timeout - (time.time() - start)
+                if remaining <= 0:
                     proc.kill()
+                    proc.wait()
                     raise AdbError("adb 传输超过总时长上限，已终止")
-                ready, _, _ = select.select([master], [], [], 30)
+                ready, _, _ = select.select([master], [], [], min(1.0, remaining))
                 if master in ready:
                     try:
                         data = os.read(master, 65536)
@@ -191,7 +192,6 @@ class AdbClient:
                     if not data:
                         break
                     buf += data
-                    last = time.time()
             out = buf.decode(errors="replace")
             proc.wait()
             os.close(master)
@@ -200,6 +200,7 @@ class AdbClient:
             return out
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait()
             os.close(master)
             raise AdbError("adb 传输超时") from None
 
@@ -305,7 +306,7 @@ class AdbClient:
     def pair_wireless(self, host_port: str, code: str) -> str:
         proc = subprocess.run(
             [self.adb_path, "pair", host_port, code],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, check=False,
         )
         if proc.returncode != 0:
             raise AdbError(proc.stderr.strip() or proc.stdout.strip())
@@ -314,7 +315,7 @@ class AdbClient:
     def connect_wireless(self, host_port: str) -> str:
         proc = subprocess.run(
             [self.adb_path, "connect", host_port],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, check=False,
         )
         if proc.returncode != 0:
             raise AdbError(proc.stderr.strip() or proc.stdout.strip())
@@ -378,7 +379,7 @@ class AdbClient:
             cmd += ["-s", self._device]
         cmd += ["exec-out", "screencap", "-p"]
         with open(save_path, "wb") as f:
-            proc = subprocess.run(cmd, stdout=f, timeout=60)
+            proc = subprocess.run(cmd, stdout=f, timeout=60, check=False)
         if proc.returncode != 0:
             raise AdbError("截屏失败")
 
@@ -439,7 +440,7 @@ class AdbClient:
         if self._device:
             cmd += ["-s", self._device]
         cmd += ["shell", shell_cmd]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
         combined = proc.stdout + proc.stderr
         if "SecurityException" in combined or "Exception occurred" in combined:
             raise AdbError("设备限制了 shell 控制蓝牙，请在手机上操作")

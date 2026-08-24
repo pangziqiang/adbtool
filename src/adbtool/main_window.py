@@ -8,10 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QCheckBox,
+    QApplication,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -98,6 +96,7 @@ class BrewWorker(QThread):
                 capture_output=True,
                 text=True,
                 timeout=1800,
+                check=False,
             )
             if proc.returncode != 0:
                 self.failed.emit(proc.stderr.strip() or proc.stdout.strip())

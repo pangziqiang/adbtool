@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import shlex
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
-from PyQt6.QtCore import QMimeData, QSettings, QSize, QUrl, Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, QSettings, QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import (
     QDesktopServices,
     QDrag,
@@ -20,10 +21,10 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFileIconProvider,
-    QLineEdit,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListView,
     QMenu,
     QMessageBox,
@@ -104,13 +105,15 @@ class _DragDropMixin:
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
-        if self._press_pos and (e.buttons() & Qt.MouseButton.LeftButton):
-            if (
-                e.position().toPoint() - self._press_pos
-            ).manhattanLength() >= QApplication.startDragDistance():
-                self._press_pos = None
-                self._start_drag()
-                return
+        if (
+            self._press_pos
+            and (e.buttons() & Qt.MouseButton.LeftButton)
+            and (e.position().toPoint() - self._press_pos).manhattanLength()
+            >= QApplication.startDragDistance()
+        ):
+            self._press_pos = None
+            self._start_drag()
+            return
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
@@ -728,7 +731,7 @@ class FilePanel(QWidget):
             self.adb._run(
                 [
                     "shell",
-                    f"am start -a android.intent.action.VIEW -d file://{e.path}",
+                    f"am start -a android.intent.action.VIEW -d file://{shlex.quote(e.path)}",
                 ],
                 check=False,
             )
@@ -926,7 +929,7 @@ class FilePanel(QWidget):
         self.adb._run(
             [
                 "shell",
-                f"am start -a android.intent.action.VIEW -d file://{paths[0]}",
+                f"am start -a android.intent.action.VIEW -d file://{shlex.quote(paths[0])}",
             ],
             check=False,
         )

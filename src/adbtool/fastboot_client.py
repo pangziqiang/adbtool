@@ -6,7 +6,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-from typing import Callable
+from typing import Callable, Final
 
 
 class FastbootError(Exception):
@@ -186,7 +186,7 @@ class FastbootClient:
         m = re.search(r"token:\s*(\S+)", out)
         return m.group(1) if m else ""
 
-    _SCRIPT_OPS = {
+    _SCRIPT_OPS: Final = {
         "flash",
         "erase",
         "update",
@@ -220,7 +220,7 @@ class FastbootClient:
 
         cmds: list[dict] = []
         for line in merged:
-            if line.startswith("#") or line.startswith("::"):
+            if line.startswith(("#", "::")):
                 continue
             body = line
             # 去掉行内注释（-- 后的单引号包裹? 保守处理：去掉 `` 和 $() 段）
@@ -229,7 +229,7 @@ class FastbootClient:
             body = re.sub(r"\$([0-9]|\*)", "", body)
             if "|" in body or "if " in body[:8] or body.startswith(("echo", "exit", "read", "set ")):
                 continue
-            if not (body.startswith("fastboot") or body.startswith("adb")):
+            if not body.startswith(("fastboot", "adb")):
                 continue
             parts = shlex.split(body)
             if not parts or parts[0] not in ("fastboot", "adb"):
@@ -266,7 +266,7 @@ class FastbootClient:
                         args.append(a)
                 self._run(args, check=False, timeout=600, line_cb=line_cb)
             elif c["tool"] == "adb":
-                subprocess.run([shutil.which("adb") or "adb"] + c["args"], timeout=300)
+                subprocess.run([shutil.which("adb") or "adb"] + c["args"], timeout=300, check=False)
 
     @staticmethod
     def _find_zstd() -> str:
@@ -325,7 +325,7 @@ class FastbootClient:
     _IMG_EXTS = (".img", ".elf", ".mbn", ".bin", ".fv", ".txt", ".dat", ".melf")
 
     def _resolve_script_arg(self, a: str, base: str, images_dir: str) -> str:
-        if a.startswith("/images/") or a.startswith("images/"):
+        if a.startswith(("/images/", "images/")):
             cand = os.path.join(images_dir, os.path.basename(a))
             if os.path.isfile(cand):
                 return cand
@@ -404,7 +404,7 @@ class FastbootClient:
 
     def _build_images_cmds(self, images_dir: str, rd: str) -> dict:
         files = sorted(os.listdir(images_dir))
-        ab = any(f.endswith("_ab.img") or f.endswith("_ab.img.zst") for f in files)
+        ab = any(f.endswith(("_ab.img", "_ab.img.zst")) for f in files)
         parts: list[str] = []
         for f in files:
             if f.endswith(".img.zst"):
@@ -413,7 +413,7 @@ class FastbootClient:
                 base = f[: -len(".img")]
             else:
                 continue
-            name = base[: -len("_ab")] if base.endswith("_ab") else base
+            name = base.removesuffix("_ab")
             if name in ("super", "cust", "preloader_raw"):
                 continue
             if name not in parts:
@@ -473,7 +473,13 @@ class FastbootClient:
         if not os.path.isdir(out) or not os.listdir(out):
             os.makedirs(out, exist_ok=True)
             with zipfile.ZipFile(zip_path) as zf:
-                for m in zf.infolist():
+                infos = zf.infolist()
+                if len(infos) > 5000:
+                    raise FastbootError("zip 条目过多，已中止解压")
+                total = sum(m.file_size for m in infos)
+                if total > 60 * 1024**3:
+                    raise FastbootError("zip 解压总大小超过 60GB，已中止解压")
+                for m in infos:
                     if m.is_dir():
                         continue
                     target = os.path.abspath(os.path.join(base, m.filename))

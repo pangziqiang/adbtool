@@ -1,7 +1,5 @@
 import os
-import subprocess
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -23,9 +21,6 @@ class TestAdbClient(unittest.TestCase):
         self.adb.device = "emulator-5554"
 
     def _fake_run(self, output):
-        proc = subprocess.CompletedProcess([], 0, stdout=output)
-        with patch.object(self.adb, "_run", return_value=output):
-            pass
         return patch.object(self.adb, "_run", return_value=output)
 
     def test_list_dir_parses_toybox(self):
@@ -54,11 +49,32 @@ class TestAdbClient(unittest.TestCase):
         self.assertEqual(devices[0].model, "23127PN0CC")
 
     def test_error_raises(self):
-        proc = subprocess.CompletedProcess([], 1, stdout="", stderr="not found")
-        with patch.object(self.adb, "_run", side_effect=AdbError("not found")):
-            with self.assertRaises(AdbError):
-                self.adb.list_dir("/nope")
+        with patch.object(self.adb, "_run", side_effect=AdbError("not found")), self.assertRaises(AdbError):
+            self.adb.list_dir("/nope")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestRunTransfer(unittest.TestCase):
+    def _client(self):
+        c = AdbClient.__new__(AdbClient)
+        c.adb_path = "/bin/sh"
+        c._device = ""
+        return c
+
+    def test_transfer_normal_output(self):
+        c = self._client()
+        out = c._run_transfer(["-c", "echo hi"], total_timeout=30)
+        self.assertEqual(out.strip(), "hi")
+
+    def test_transfer_total_timeout(self):
+        c = self._client()
+        with self.assertRaises(AdbError):
+            c._run_transfer(["-c", "sleep 10"], total_timeout=1)
+
+    def test_transfer_waits_through_pause(self):
+        # 模拟无线卡顿后恢复：不应被中途中断
+        c = self._client()
+        out = c._run_transfer(["-c", "sleep 2; echo recovered"], total_timeout=30)
+        self.assertEqual(out.strip(), "recovered")
