@@ -13,6 +13,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Final
+from urllib.parse import urlparse
 
 from PyQt6.QtCore import QPointF, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import (
@@ -51,6 +52,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from . import payload_dumper
 from .adb_client import AdbClient, AdbError
 from .fastboot_client import FastbootClient, FastbootError
 
@@ -1212,6 +1214,36 @@ class FastbootDialog(QDialog):
         hint.setStyleSheet("color:#888;")
         vk.addWidget(hint)
 
+        # 云提取：粘贴官方全量包链接，下载后可选分区提取或刷入
+        cloud = QHBoxLayout()
+        self.cloud_url = QLineEdit(tab_pkg)
+        self.cloud_url.setPlaceholderText("粘贴 ROM 链接（官方全量包 zip / payload.bin URL）…")
+        self.cloud_dl_btn = QPushButton("下载并解包", tab_pkg)
+        self.cloud_dl_btn.clicked.connect(self._cloud_download)
+        cloud.addWidget(self.cloud_url, 1)
+        cloud.addWidget(self.cloud_dl_btn)
+        vk.addLayout(cloud)
+
+        cloud2 = QHBoxLayout()
+        self.cloud_bar = QProgressBar(tab_pkg)
+        self.cloud_bar.setRange(0, 100)
+        self.cloud_bar.setValue(0)
+        self.cloud_part_combo = QComboBox(tab_pkg)
+        self.cloud_part_combo.setEnabled(False)
+        self.cloud_extract_btn = QPushButton("提取所选分区…", tab_pkg)
+        self.cloud_extract_btn.setEnabled(False)
+        self.cloud_extract_btn.clicked.connect(self._cloud_extract)
+        self.cloud_flash_btn = QPushButton("刷入所选分区", tab_pkg)
+        self.cloud_flash_btn.setEnabled(False)
+        self.cloud_flash_btn.clicked.connect(self._cloud_flash)
+        cloud2.addWidget(self.cloud_bar, 1)
+        cloud2.addWidget(QLabel("分区", tab_pkg))
+        cloud2.addWidget(self.cloud_part_combo)
+        cloud2.addWidget(self.cloud_extract_btn)
+        cloud2.addWidget(self.cloud_flash_btn)
+        vk.addLayout(cloud2)
+        self._cloud_payload = ""
+
         # Package dir row
         grp2b = QHBoxLayout()
         self.pkg_edit = QLineEdit(tab_pkg)
@@ -1407,6 +1439,145 @@ class FastbootDialog(QDialog):
     def _on_pkg_parse_fail(self, msg):
         self.pkg_parse.setEnabled(True)
         self.status.setText(f"X 解析失败: {msg}")
+
+    # ---------- 云提取：下载 ROM 链接并选分区提取/刷入 ----------
+    def _cloud_download(self):
+        url = self.cloud_url.text().strip()
+        if not url.startswith(("http://", "https://")):
+            self.status.setText("请输入有效的 ROM 链接")
+            return
+        self.cloud_dl_btn.setEnabled(False)
+        self.cloud_bar.setValue(0)
+        self.cloud_part_combo.clear()
+        self.cloud_part_combo.setEnabled(False)
+        self.cloud_extract_btn.setEnabled(False)
+        self.cloud_flash_btn.setEnabled(False)
+        self._cloud_payload = ""
+        self.output.clear()
+        self.status.setText("正在下载 ROM 包...")
+        self._queue_out("开始下载: " + url)
+
+        def work(cb, ui):
+            name = os.path.basename(urlparse(url).path) or "rom"
+            if "." not in name:
+                name += ".bin"
+            ddir = os.path.join(_SAVE_DIR, "rom_downloads")
+            dest = os.path.join(ddir, name)
+            if os.path.exists(dest):
+                base, ext = os.path.splitext(name)
+                i = 1
+                while os.path.exists(dest):
+                    dest = os.path.join(ddir, f"{base}_{i}{ext}")
+                    i += 1
+
+            def prog(done, total):
+                if total:
+                    ui(("progress", int(done * 100 / total)))
+                    ui(("status", f"下载中 {done / 1048576:.1f}/{total / 1048576:.1f} MB"))
+                else:
+                    ui(("status", f"下载中 {done / 1048576:.1f} MB"))
+
+            payload_dumper.download(url, dest, progress=prog)
+            ui(("progress", 100))
+            ui(("status", "下载完成，正在识别与解析..."))
+            cb(f"下载完成: {dest}")
+            p = dest
+            if not payload_dumper.is_payload(p):
+                with open(p, "rb") as f:
+                    if f.read(4) != b"PK\x03\x04":
+                        raise payload_dumper.PayloadError("下载的文件既不是 payload.bin 也不是 zip 压缩包")
+                p = payload_dumper.extract_payload_from_zip(dest, os.path.join(ddir, ".cloud_payload"))
+                cb("已从 zip 中提取 payload.bin")
+            parts = payload_dumper.list_partitions(p)
+            return p, parts
+
+        self._worker = FastbootWorker(work, self)
+        self._worker.line.connect(self._queue_out)
+        self._worker.ui.connect(self._on_worker_ui)
+        self._worker.done.connect(self._on_cloud_parsed)
+        self._worker.fail.connect(self._on_cloud_fail)
+        self._worker.start()
+
+    def _on_cloud_parsed(self, result):
+        self.cloud_dl_btn.setEnabled(True)
+        p, parts = result[0]
+        self._cloud_payload = p
+        self.cloud_part_combo.clear()
+        self.cloud_part_combo.addItems(parts)
+        self.cloud_part_combo.setEnabled(True)
+        self.cloud_extract_btn.setEnabled(True)
+        self.cloud_flash_btn.setEnabled(True)
+        self.status.setText(f"已解析，共 {len(parts)} 个分区，可提取或刷入所选分区。")
+
+    def _on_cloud_fail(self, msg):
+        self.cloud_dl_btn.setEnabled(True)
+        self.cloud_part_combo.setEnabled(False)
+        self.cloud_extract_btn.setEnabled(False)
+        self.cloud_flash_btn.setEnabled(False)
+        self.status.setText(f"X 云提取失败: {msg}")
+        self.output.addItem(f"X {msg}")
+
+    def _cloud_extract(self):
+        if not self._cloud_payload:
+            self.status.setText("请先下载并解析 ROM 包")
+            return
+        part = self.cloud_part_combo.currentText()
+        out = QFileDialog.getExistingDirectory(self, "选择提取保存目录", _SAVE_DIR)
+        if not out:
+            return
+        self.cloud_extract_btn.setEnabled(False)
+        self.status.setText(f"正在提取 {part} ...")
+
+        def work(cb, ui):
+            payload_dumper.extract_partitions(self._cloud_payload, out, [part], line_cb=cb)
+            ui(("out", f"OK 已提取 {part}.img 到 {out}"))
+
+        self._worker = FastbootWorker(work, self)
+        self._worker.line.connect(self._queue_out)
+        self._worker.ui.connect(self._on_worker_ui)
+        self._worker.done.connect(
+            lambda _: (self.cloud_extract_btn.setEnabled(True), self.status.setText(f"已提取 {part}.img"))[1]
+        )
+        self._worker.fail.connect(self._on_fail)
+        self._worker.start()
+
+    def _cloud_flash(self):
+        if not self._cloud_payload:
+            self.status.setText("请先下载并解析 ROM 包")
+            return
+        if not self.fb.device:
+            self.status.setText("请先连接 fastboot 设备")
+            return
+        part = self.cloud_part_combo.currentText()
+        tmp = tempfile.mkdtemp(prefix="adbtool_cloud_")
+        self._cloud_tmp = tmp
+        self.output.clear()
+        self.status.setText(f"正在提取并刷入 {part} ...")
+        self._set_flashing(True)
+
+        def work(cb, ui):
+            payload_dumper.extract_partitions(self._cloud_payload, tmp, [part], line_cb=cb)
+            img = os.path.join(tmp, f"{part}.img")
+            if not os.path.isfile(img):
+                raise payload_dumper.PayloadError(f"提取后未找到 {part}.img")
+            cb(f"flash {part} ← {os.path.basename(img)}")
+            self.fb.flash(part, img, line_cb=cb)
+            ui(("out", f"OK {part} 刷入完成"))
+
+        self._worker = FastbootWorker(work, self)
+        self._worker.line.connect(self._queue_out)
+        self._worker.ui.connect(self._on_worker_ui)
+        self._worker.done.connect(self._on_cloud_flash_done)
+        self._worker.fail.connect(self._on_fail)
+        self._worker.start()
+
+    def _on_cloud_flash_done(self, _):
+        self._set_flashing(False)
+        self.status.setText("OK 刷入完成")
+        tmp = getattr(self, "_cloud_tmp", None)
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+            self._cloud_tmp = ""
 
     def _resize_table_to_rows(self):
         rows = self.part_table.rowCount()
@@ -1714,6 +1885,9 @@ class FastbootDialog(QDialog):
             self.reboot_btn,
             self.quick_add,
             self.quick_img_btn,
+            self.cloud_dl_btn,
+            self.cloud_extract_btn,
+            self.cloud_flash_btn,
         ):
             w.setEnabled(not flashing)
         self.part_name.setEnabled(not flashing)
@@ -1742,6 +1916,8 @@ class FastbootDialog(QDialog):
                 if style:
                     bar.setStyleSheet(style)
                 bar.setValue(value)
+        elif kind == "progress":
+            self.cloud_bar.setValue(op[1])
         elif kind == "out":
             self._queue_out(op[1])
         elif kind == "status":
@@ -1798,3 +1974,239 @@ class FastbootDialog(QDialog):
         if w:
             w.wait(1000)
         super().closeEvent(ev)
+
+
+class OfflinePatchDialog(QDialog):
+    """脱机修补：Magisk 修补 / 制作 GKI 镜像 / SK-ROOT。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("脱机修补")
+        self.resize(680, 560)
+        self._worker: FastbootWorker | None = None
+
+        lay = QVBoxLayout(self)
+        tip = QLabel("脱机修补：不连接设备，在电脑端对 boot/init_boot 镜像打补丁，产物用 fastboot 刷入。", self)
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color:#888;")
+        lay.addWidget(tip)
+
+        self.tabs = QTabWidget(self)
+        lay.addWidget(self.tabs)
+
+        # ---- Magisk 修补 ----
+        tab_mag = QWidget(self)
+        vm = QVBoxLayout(tab_mag)
+
+        fm = QFormLayout()
+        row1 = QHBoxLayout()
+        self.mag_boot = QLineEdit(tab_mag)
+        b1 = QPushButton("选择 boot/init_boot…", tab_mag)
+        b1.clicked.connect(lambda: self._pick_file(self.mag_boot, "boot/init_boot", "镜像 (*.img)"))
+        row1.addWidget(self.mag_boot, 1)
+        row1.addWidget(b1)
+        fm.addRow("修补镜像", row1)
+
+        row2 = QHBoxLayout()
+        self.mag_apk = QLineEdit(tab_mag)
+        b2 = QPushButton("选择 Magisk APK…", tab_mag)
+        b2.clicked.connect(lambda: self._pick_file(self.mag_apk, "Magisk APK", "APK (*.apk)"))
+        row2.addWidget(self.mag_apk, 1)
+        row2.addWidget(b2)
+        fm.addRow("Magisk 安装包", row2)
+
+        self.mag_abi = QComboBox(tab_mag)
+        self.mag_abi.addItems(["arm64-v8a", "armeabi-v7a", "x86_64", "x86"])
+        fm.addRow("架构 ABI", self.mag_abi)
+        vm.addLayout(fm)
+
+        grp = QHBoxLayout()
+        self.opt_keepverity = QCheckBox("保留 AVB2.0/dm-verity", tab_mag)
+        self.opt_keepverity.setChecked(True)
+        self.opt_keeplen = QCheckBox("保留强制加密", tab_mag)
+        self.opt_keeplen.setChecked(True)
+        self.opt_recovery = QCheckBox("安装到 Recovery", tab_mag)
+        self.opt_patchvbmeta = QCheckBox("修补 vboot 标志", tab_mag)
+        self.opt_forcefs = QCheckBox("强制 rootfs", tab_mag)
+        for w in (self.opt_keepverity, self.opt_keeplen, self.opt_recovery, self.opt_patchvbmeta, self.opt_forcefs):
+            grp.addWidget(w)
+        grp.addStretch(1)
+        vm.addLayout(grp)
+
+        row4 = QHBoxLayout()
+        self.mag_out = QLineEdit(tab_mag)
+        self.mag_out.setPlaceholderText(os.path.join(_SAVE_DIR, "offline_patch"))
+        b3 = QPushButton("输出目录…", tab_mag)
+        b3.clicked.connect(self._pick_outdir)
+        row4.addWidget(QLabel("输出目录", tab_mag))
+        row4.addWidget(self.mag_out, 1)
+        row4.addWidget(b3)
+        vm.addLayout(row4)
+
+        self.mag_btn = QPushButton("修补镜像", tab_mag)
+        self.mag_btn.clicked.connect(self._magisk_patch)
+        vm.addWidget(self.mag_btn)
+        self.tabs.addTab(tab_mag, "Magisk 修补")
+
+        # ---- 制作 GKI 镜像 ----
+        tab_gki = QWidget(self)
+        vg = QVBoxLayout(tab_gki)
+        fg = QFormLayout()
+        rowb = QHBoxLayout()
+        self.gki_boot = QLineEdit(tab_gki)
+        bb = QPushButton("选择 boot.img…", tab_gki)
+        bb.clicked.connect(lambda: self._pick_file(self.gki_boot, "boot", "镜像 (*.img)"))
+        rowb.addWidget(self.gki_boot, 1)
+        rowb.addWidget(bb)
+        fg.addRow("boot 路径", rowb)
+        rowa = QHBoxLayout()
+        self.gki_ak3 = QLineEdit(tab_gki)
+        ba = QPushButton("选择 AK3…", tab_gki)
+        ba.clicked.connect(lambda: self._pick_file(self.gki_ak3, "AnyKernel3", "压缩包 (*.zip)"))
+        rowa.addWidget(self.gki_ak3, 1)
+        rowa.addWidget(ba)
+        fg.addRow("ak3 路径", rowa)
+        vg.addLayout(fg)
+        rowg = QHBoxLayout()
+        self.gki_out = QLineEdit(tab_gki)
+        bg = QPushButton("输出目录…", tab_gki)
+        bg.clicked.connect(lambda: self._set_outdir(self.gki_out))
+        rowg.addWidget(QLabel("输出目录", tab_gki))
+        rowg.addWidget(self.gki_out, 1)
+        rowg.addWidget(bg)
+        vg.addLayout(rowg)
+        self.gki_btn = QPushButton("开始制作", tab_gki)
+        self.gki_btn.clicked.connect(self._gki_build)
+        vg.addWidget(self.gki_btn)
+        vg.addStretch(1)
+        self.tabs.addTab(tab_gki, "制作 GKI 镜像")
+
+        # ---- SK-ROOT ----
+        tab_sk = QWidget(self)
+        vs = QVBoxLayout(tab_sk)
+        fs = QFormLayout()
+        rows = QHBoxLayout()
+        self.sk_boot = QLineEdit(tab_sk)
+        bs = QPushButton("选择 boot.img…", tab_sk)
+        bs.clicked.connect(lambda: self._pick_file(self.sk_boot, "boot", "镜像 (*.img)"))
+        rows.addWidget(self.sk_boot, 1)
+        rows.addWidget(bs)
+        fs.addRow("boot 路径", rows)
+        vs.addLayout(fs)
+        self.sk_btn = QPushButton("开始修补", tab_sk)
+        self.sk_btn.clicked.connect(self._sk_patch)
+        vs.addWidget(self.sk_btn)
+        note = QLabel("SK-ROOT 为厂商（三星 KNOX）私有方案，通用实现尚不支持。", tab_sk)
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#c00;")
+        vs.addWidget(note)
+        vs.addStretch(1)
+        self.tabs.addTab(tab_sk, "SK-ROOT 一键修补")
+
+        # 共享日志
+        self.log = QListWidget(self)
+        self.log.setStyleSheet("QListWidget::item { font-family: Menlo; font-size: 11px; }")
+        lay.addWidget(self.log, 1)
+        clearbar = QHBoxLayout()
+        clearbar.addStretch(1)
+        clear_btn = QPushButton("清空日志", self)
+        clear_btn.clicked.connect(lambda: self.log.clear())
+        clearbar.addWidget(clear_btn)
+        lay.addLayout(clearbar)
+
+    # ---------- helpers ----------
+    def _log(self, text: str):
+        self.log.addItem(text)
+
+    def _pick_file(self, edit: QLineEdit, title: str, filt: str):
+        path, _ = QFileDialog.getOpenFileName(self, f"选择{title}", os.path.expanduser("~/Desktop"), filt)
+        if path:
+            edit.setText(path)
+
+    def _pick_outdir(self):
+        self._set_outdir(self.mag_out)
+
+    def _set_outdir(self, edit: QLineEdit):
+        path = QFileDialog.getExistingDirectory(self, "选择输出目录", os.path.expanduser("~/Desktop"))
+        if path:
+            edit.setText(path)
+
+    def _default_out(self, edit: QLineEdit) -> str:
+        out = (edit.text() or "").strip() or os.path.join(_SAVE_DIR, "offline_patch")
+        os.makedirs(out, exist_ok=True)
+        return out
+
+    def _run(self, fn, on_done, disable_btn: QPushButton):
+        if self._worker and self._worker.isRunning():
+            return
+        disable_btn.setEnabled(False)
+        self.log.clear()
+        self._worker = FastbootWorker(fn, self)
+        self._worker.line.connect(self._log)
+        self._worker.done.connect(lambda r: (disable_btn.setEnabled(True), on_done(r[0]))[1])
+        self._worker.fail.connect(lambda m: (disable_btn.setEnabled(True), self._log(f"X 失败: {m}"))[1])
+        self._worker.start()
+
+    # ---------- Magisk ----------
+    def _magisk_patch(self):
+        from . import offline_patch
+
+        boot = self.mag_boot.text().strip()
+        apk = self.mag_apk.text().strip()
+        if not os.path.isfile(boot):
+            self._log("请选择 boot/init_boot 镜像")
+            return
+        if not os.path.isfile(apk):
+            self._log("请选择 Magisk APK")
+            return
+        out = self._default_out(self.mag_out)
+        options = {
+            "abi": self.mag_abi.currentText(),
+            "keep_verity": self.opt_keepverity.isChecked(),
+            "keep_force_encrypt": self.opt_keeplen.isChecked(),
+            "recovery": self.opt_recovery.isChecked(),
+            "patch_vbmeta": self.opt_patchvbmeta.isChecked(),
+            "force_rootfs": self.opt_forcefs.isChecked(),
+        }
+
+        def work(cb, ui):
+            cb("开始 Magisk 修补...")
+            return offline_patch.patch_magisk(boot, apk, out, options=options, line_cb=cb)
+
+        self._run(work, lambda p: self._log(f"OK 修补完成: {p}"), self.mag_btn)
+
+    # ---------- GKI ----------
+    def _gki_build(self):
+        from . import offline_patch
+
+        boot = self.gki_boot.text().strip()
+        ak3 = self.gki_ak3.text().strip()
+        if not os.path.isfile(boot):
+            self._log("请选择 boot.img")
+            return
+        if not os.path.isfile(ak3):
+            self._log("请选择 AK3 压缩包")
+            return
+        out = self._default_out(self.gki_out)
+
+        def work(cb, ui):
+            cb("开始制作 GKI 镜像...")
+            return offline_patch.build_gki(boot, ak3, out, line_cb=cb)
+
+        self._run(work, lambda p: self._log(f"OK 制作完成: {p}"), self.gki_btn)
+
+    # ---------- SK-ROOT ----------
+    def _sk_patch(self):
+        from . import offline_patch
+
+        boot = self.sk_boot.text().strip()
+        if not os.path.isfile(boot):
+            self._log("请选择 boot.img")
+            return
+        out = self._default_out(None)
+
+        def work(cb, ui):
+            cb("开始 SK-ROOT 修补...")
+            return offline_patch.patch_skroot(boot, out, line_cb=cb)
+
+        self._run(work, lambda p: self._log(f"OK 修补完成: {p}"), self.sk_btn)

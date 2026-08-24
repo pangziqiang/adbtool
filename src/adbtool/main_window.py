@@ -32,6 +32,7 @@ from .tools import (
     AdbTask,
     FastbootDialog,
     LogcatDialog,
+    OfflinePatchDialog,
     PackageDialog,
     PairDialog,
     RecordDialog,
@@ -376,6 +377,10 @@ class MainWindow(QMainWindow):
         self.fastboot_btn.setToolTip("Fastboot 刷机：单分区/完整包刷写")
         self.fastboot_btn.clicked.connect(self._show_fastboot)
         tb.addWidget(self.fastboot_btn)
+        self.offline_patch_btn = QPushButton("脱机修补", self)
+        self.offline_patch_btn.setToolTip("脱机修补：Magisk / 制作 GKI 镜像")
+        self.offline_patch_btn.clicked.connect(self._show_offline_patch)
+        tb.addWidget(self.offline_patch_btn)
 
         tb.addSeparator()
         self.reboot_btn = QPushButton("重启", self)
@@ -613,6 +618,9 @@ class MainWindow(QMainWindow):
 
     def _show_fastboot(self):
         FastbootDialog(self.adb, self).exec()
+
+    def _show_offline_patch(self):
+        OfflinePatchDialog(self).exec()
 
     def _reboot_device(self, mode: str):
         if not self.adb.device:

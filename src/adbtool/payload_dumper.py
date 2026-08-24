@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tarfile
 import urllib.request
+import zipfile
 from typing import Callable
 
 _REPO = "ssut/payload-dumper-go"
@@ -158,3 +159,64 @@ def extract(
     proc.wait(timeout=3600)
     if proc.returncode != 0:
         raise PayloadError("payload 解包失败")
+
+
+def download(
+    url: str,
+    dest: str,
+    progress: Callable[[int, int], None] | None = None,
+) -> str:
+    """下载 url 到 dest；progress 回调 (已下载字节, 总字节)，总字节可能为 0 表示未知。"""
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    req = urllib.request.Request(url, headers={"User-Agent": "adbtool/0.1"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        total = int(resp.headers.get("Content-Length") or 0)
+        done = 0
+        with open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
+    return dest
+
+
+def extract_payload_from_zip(zip_path: str, out_dir: str) -> str:
+    """从卡刷 zip 里提取 payload.bin，返回其路径。"""
+    with zipfile.ZipFile(zip_path) as zf:
+        member = next((n for n in zf.namelist() if n.endswith("payload.bin")), None)
+        if not member:
+            raise PayloadError("压缩包里没有 payload.bin")
+        os.makedirs(out_dir, exist_ok=True)
+        target = os.path.join(out_dir, "payload.bin")
+        with zf.open(member) as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return target
+
+
+def extract_partitions(
+    payload_path: str,
+    out_dir: str,
+    partitions: list[str],
+    line_cb: Callable[[str], None] | None = None,
+) -> None:
+    """只提取 payload 中指定的分区（payload-dumper-go -partitions 逗号分隔）。"""
+    tool = ensure_payload_dumper()
+    os.makedirs(out_dir, exist_ok=True)
+    args = [tool, "-partitions", ",".join(partitions), "-o", out_dir, payload_path]
+    proc = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        if line_cb:
+            line_cb(line.rstrip())
+    proc.wait(timeout=3600)
+    if proc.returncode != 0:
+        raise PayloadError("提取分区失败")
