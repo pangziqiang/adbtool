@@ -7,13 +7,8 @@ import zipfile
 
 from .adb_client import AdbClient, AdbError
 
-_OFFICIAL_URL = (
-    "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip"
-)
-_FALLBACK_URL = (
-    "https://mirrors.huaweicloud.com/android/repository/"
-    "platform-tools_r23.0.1-macosx.zip"
-)
+_OFFICIAL_URL = "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip"
+_FALLBACK_URL = "https://mirrors.huaweicloud.com/android/repository/platform-tools_r23.0.1-macosx.zip"
 _SDK_DIR = os.path.expanduser("~/Library/Android/sdk")
 
 

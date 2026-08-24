@@ -62,11 +62,7 @@ class DropModel(QStandardItemModel):
         md = QMimeData()
         md.setData(
             MIME_DROP,
-            (
-                ("local" if self.panel.is_local else "remote")
-                + "\n"
-                + "\n".join(paths)
-            ).encode(),
+            (("local" if self.panel.is_local else "remote") + "\n" + "\n".join(paths)).encode(),
         )
         return md
 
@@ -108,8 +104,7 @@ class _DragDropMixin:
         if (
             self._press_pos
             and (e.buttons() & Qt.MouseButton.LeftButton)
-            and (e.position().toPoint() - self._press_pos).manhattanLength()
-            >= QApplication.startDragDistance()
+            and (e.position().toPoint() - self._press_pos).manhattanLength() >= QApplication.startDragDistance()
         ):
             self._press_pos = None
             self._start_drag()
@@ -127,11 +122,7 @@ class _DragDropMixin:
         md = QMimeData()
         md.setData(
             MIME_DROP,
-            (
-                ("local" if self.panel.is_local else "remote")
-                + "\n"
-                + "\n".join(paths)
-            ).encode(),
+            (("local" if self.panel.is_local else "remote") + "\n" + "\n".join(paths)).encode(),
         )
         drag = QDrag(self)
         drag.setMimeData(md)
@@ -252,9 +243,7 @@ class FilePanel(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.doubleClicked.connect(self._on_double_click)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
-        self.table.selectionModel().selectionChanged.connect(
-            lambda *_: self.update_status()
-        )
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self.update_status())
         self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self.table.horizontalHeader().sectionResized.connect(lambda *_: self._save_widths())
         self._sort_col = 0
@@ -274,18 +263,14 @@ class FilePanel(QWidget):
         self.grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.grid.doubleClicked.connect(self._on_double_click)
         self.grid.customContextMenuRequested.connect(self._show_context_menu)
-        self.grid.selectionModel().selectionChanged.connect(
-            lambda *_: self.update_status()
-        )
+        self.grid.selectionModel().selectionChanged.connect(lambda *_: self.update_status())
 
     def set_panel_title(self, title: str):
         if self._title_label is not None:
             self._title_label.setText(f"  {title} ")
         else:
             self._title_label = QLabel(f"  {title} ", self)
-            self._title_label.setStyleSheet(
-                "background: #2d2d2d; color: #fff; padding: 4px 8px; font-weight: bold;"
-            )
+            self._title_label.setStyleSheet("background: #2d2d2d; color: #fff; padding: 4px 8px; font-weight: bold;")
             self.nav_row.insertWidget(0, self._title_label)
 
     def _build_nav_row(self):
@@ -338,16 +323,13 @@ class FilePanel(QWidget):
         self.copy_btn = self._icon_btn("复制", None, self.copy_selection)
         self.paste_btn = self._icon_btn("粘贴", None, self.paste)
         self.del_btn = self._icon_btn("删除", "删除选中项 (Delete)", self.delete)
-        for w in (self.new_btn, self.rename_btn, self.cut_btn, self.copy_btn,
-                  self.paste_btn, self.del_btn):
+        for w in (self.new_btn, self.rename_btn, self.cut_btn, self.copy_btn, self.paste_btn, self.del_btn):
             self.action_row.addWidget(w)
         self.action_row.addStretch(1)
         if self.is_local:
             self.transfer_btn = self._icon_btn("传输到手机", None, self._to_phone)
             self.action_row.addWidget(self.transfer_btn)
-            self.install_btn = self._icon_btn(
-                "安装到手机", "选中 .apk 文件后安装到手机", self._install_apks
-            )
+            self.install_btn = self._icon_btn("安装到手机", "选中 .apk 文件后安装到手机", self._install_apks)
             self.action_row.addWidget(self.install_btn)
         else:
             self.transfer_btn = self._icon_btn("传输到电脑", None, self._to_computer)
@@ -462,11 +444,7 @@ class FilePanel(QWidget):
         self.navigate(target, record=False)
 
     def go_up(self):
-        parent = (
-            str(Path(self.current_path).parent)
-            if self.is_local
-            else str(PurePosixPath(self.current_path).parent)
-        )
+        parent = str(Path(self.current_path).parent) if self.is_local else str(PurePosixPath(self.current_path).parent)
         if parent != self.current_path:
             self.navigate(parent)
 
@@ -523,6 +501,7 @@ class FilePanel(QWidget):
     def _browse_local_dir(self):
         start = self.path_edit.text() if self.path_edit else str(Path.home())
         import os as _os
+
         if not _os.path.isdir(start):
             start = str(Path.home())
         path = QFileDialog.getExistingDirectory(self, "选择目录", start)
@@ -534,6 +513,7 @@ class FilePanel(QWidget):
         if not path:
             return
         import os as _os
+
         if not _os.path.isdir(path):
             self.status_message.emit(f"本地路径不存在: {path}")
             return
@@ -557,10 +537,7 @@ class FilePanel(QWidget):
             ]
             volumes = Path("/Volumes")
             if volumes.exists():
-                seeds += [
-                    str(pp) for pp in sorted(volumes.iterdir())
-                    if pp.is_dir()
-                ]
+                seeds += [str(pp) for pp in sorted(volumes.iterdir()) if pp.is_dir()]
         else:
             seeds = [
                 "/sdcard",
@@ -643,11 +620,7 @@ class FilePanel(QWidget):
         name_item.setData(e.is_dir, ROLE_IS_DIR)
         name_item.setData((0 if e.is_dir else 1, e.name.lower()), ROLE_SORT)
         name_item.setIcon(
-            self._icons.icon(
-                QFileIconProvider.IconType.Folder
-                if e.is_dir
-                else QFileIconProvider.IconType.File
-            )
+            self._icons.icon(QFileIconProvider.IconType.Folder if e.is_dir else QFileIconProvider.IconType.File)
         )
         size_item = QStandardItem("" if e.is_dir else self._fmt_size(e.size))
         size_item.setData(e.size, ROLE_SORT)
@@ -668,13 +641,8 @@ class FilePanel(QWidget):
         rows = self.model.rowCount()
         sel = self.get_selected_paths()
         if sel:
-            total = sum(
-                self.model.item(r, 1).data(ROLE_SORT)
-                for r in self._all_selected_rows()
-            )
-            self.info_label.setText(
-                f"{rows} 项 · 已选 {len(sel)} 项 · 合计 {self._fmt_size(total)}"
-            )
+            total = sum(self.model.item(r, 1).data(ROLE_SORT) for r in self._all_selected_rows())
+            self.info_label.setText(f"{rows} 项 · 已选 {len(sel)} 项 · 合计 {self._fmt_size(total)}")
         else:
             self.info_label.setText(f"{rows} 项")
 
@@ -772,6 +740,7 @@ class FilePanel(QWidget):
 
     def _move_local(self, src: str, dest: str, cut: bool):
         import shutil
+
         try:
             if cut:
                 shutil.move(src, dest)
@@ -788,9 +757,7 @@ class FilePanel(QWidget):
         paths = self.get_selected_paths()
         if not paths:
             return
-        reply = QMessageBox.question(
-            self, "确认删除", f"确定删除 {len(paths)} 项？此操作不可恢复。"
-        )
+        reply = QMessageBox.question(self, "确认删除", f"确定删除 {len(paths)} 项？此操作不可恢复。")
         if reply != QMessageBox.StandardButton.Yes:
             return
         for p in paths:
@@ -798,6 +765,7 @@ class FilePanel(QWidget):
                 if self.is_local:
                     if os.path.isdir(p):
                         import shutil
+
                         shutil.rmtree(p)
                     else:
                         os.remove(p)
@@ -848,6 +816,7 @@ class FilePanel(QWidget):
 
     def _on_drop(self, src_is_local: bool, paths: list[str], dest: str | None = None):
         import shutil
+
         if not paths:
             return
         dest = dest or self.current_path
@@ -888,9 +857,7 @@ class FilePanel(QWidget):
     def _install_apks(self):
         if not self.is_local:
             return
-        apks = [
-            p for p in self.get_selected_paths() if p.lower().endswith(".apk")
-        ]
+        apks = [p for p in self.get_selected_paths() if p.lower().endswith(".apk")]
         if not apks:
             self.status_message.emit("请先选中 .apk 文件")
             return

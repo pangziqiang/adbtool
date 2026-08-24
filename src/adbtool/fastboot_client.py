@@ -110,7 +110,6 @@ class FastbootClient:
                 result[m.group(1)] = m.group(2).strip()
         return result
 
-
     def get_partition_list(self, line_cb=None):
         """Read device partition table. Returns list of partition names."""
         # Method 1: try 'getvar all' for partition-type entries
@@ -128,13 +127,43 @@ class FastbootClient:
 
         # Method 2: probe common partition names
         common = [
-            "boot", "system", "vendor", "product", "dtbo", "vbmeta",
-            "recovery", "cache", "userdata", "metadata", "modem",
-            "boot_b", "system_b", "vendor_b", "product_b", "dtbo_b",
-            "vbmeta_b", "modem_b", "super", "init_boot", "init_boot_b",
-            "vbmeta_system", "vbmeta_vendor", "logo", "abl", "xbl",
-            "rpm", "tz", "devcfg", "keymaster", "misc", "persist",
-            "frp", "config", "rawdump", "ddr", "sec",
+            "boot",
+            "system",
+            "vendor",
+            "product",
+            "dtbo",
+            "vbmeta",
+            "recovery",
+            "cache",
+            "userdata",
+            "metadata",
+            "modem",
+            "boot_b",
+            "system_b",
+            "vendor_b",
+            "product_b",
+            "dtbo_b",
+            "vbmeta_b",
+            "modem_b",
+            "super",
+            "init_boot",
+            "init_boot_b",
+            "vbmeta_system",
+            "vbmeta_vendor",
+            "logo",
+            "abl",
+            "xbl",
+            "rpm",
+            "tz",
+            "devcfg",
+            "keymaster",
+            "misc",
+            "persist",
+            "frp",
+            "config",
+            "rawdump",
+            "ddr",
+            "sec",
         ]
         for name in common:
             try:
@@ -144,6 +173,7 @@ class FastbootClient:
             except Exception:
                 pass
         return sorted(partitions)
+
     def flash(self, partition: str, img_path: str, line_cb=None) -> None:
         if img_path.endswith((".zst", ".lz4")):
             plain, tmp_root = self._decompress_to_tmp(img_path)
@@ -360,15 +390,11 @@ class FastbootClient:
                     continue
                 resolved = [args[0]]
                 for a in args[1:]:
-                    if a.endswith(self._IMG_EXTS) and (
-                        not os.path.isabs(a) or a.startswith("/images/")
-                    ):
+                    if a.endswith(self._IMG_EXTS) and (not os.path.isabs(a) or a.startswith("/images/")):
                         resolved.append(self._resolve_script_arg(a, base, images_dir))
                     else:
                         resolved.append(a)
-                cleaned.append(
-                    {"tool": "fastboot", "args": resolved, "raw": c["raw"]}
-                )
+                cleaned.append({"tool": "fastboot", "args": resolved, "raw": c["raw"]})
             if cleaned:
                 ab = any("_ab" in a for c in cleaned for a in c["args"])
                 return {"commands": cleaned, "right_device": rd, "ab": ab, "source": "script"}
@@ -378,14 +404,13 @@ class FastbootClient:
             out = os.path.join(pkg_dir, ".payload_extracted")
             if not os.path.isdir(out) or not os.listdir(out):
                 from .payload_dumper import extract
+
                 if line_cb:
                     line_cb("正在解包 payload.bin（全量包较大，可能耗时数分钟）...")
                 extract(payload, out, line_cb=line_cb)
             images_dir = out
         if not os.path.isdir(images_dir):
-            raise FastbootError(
-                "刷机包目录里既没有 flash_all 脚本、payload.bin，也没有 images/ 目录"
-            )
+            raise FastbootError("刷机包目录里既没有 flash_all 脚本、payload.bin，也没有 images/ 目录")
         return self._build_images_cmds(images_dir, rd)
 
     @staticmethod
@@ -425,24 +450,46 @@ class FastbootClient:
                 src = os.path.join(images_dir, f"{p}_ab.img")
                 if not os.path.isfile(src):
                     src = os.path.join(images_dir, f"{p}_ab.img.zst")
-                cmds.append({"tool": "fastboot", "args": ["flash", f"{p}_a", src], "raw": f"flash {p}_a ← {os.path.basename(src)}"})
-                cmds.append({"tool": "fastboot", "args": ["flash", f"{p}_b", src], "raw": f"flash {p}_b ← {os.path.basename(src)}"})
+                cmds.append(
+                    {
+                        "tool": "fastboot",
+                        "args": ["flash", f"{p}_a", src],
+                        "raw": f"flash {p}_a ← {os.path.basename(src)}",
+                    }
+                )
+                cmds.append(
+                    {
+                        "tool": "fastboot",
+                        "args": ["flash", f"{p}_b", src],
+                        "raw": f"flash {p}_b ← {os.path.basename(src)}",
+                    }
+                )
             else:
                 src = os.path.join(images_dir, f"{p}.img")
                 if not os.path.isfile(src):
                     src = os.path.join(images_dir, f"{p}.img.zst")
-                cmds.append({"tool": "fastboot", "args": ["flash", p, src], "raw": f"flash {p} ← {os.path.basename(src)}"})
+                cmds.append(
+                    {"tool": "fastboot", "args": ["flash", p, src], "raw": f"flash {p} ← {os.path.basename(src)}"}
+                )
         for sp in ("cust", "super"):
             for ext in (".img", ".img.zst"):
                 src = os.path.join(images_dir, f"{sp}{ext}")
                 if os.path.isfile(src):
-                    cmds.append({"tool": "fastboot", "args": ["flash", sp, src], "raw": f"flash {sp} ← {os.path.basename(src)}"})
+                    cmds.append(
+                        {"tool": "fastboot", "args": ["flash", sp, src], "raw": f"flash {sp} ← {os.path.basename(src)}"}
+                    )
                     break
         for ext in (".img", ".img.zst"):
             src = os.path.join(images_dir, f"preloader_raw{ext}")
             if os.path.isfile(src):
                 for part in ("preloader_a", "preloader_b", "preloader1", "preloader2"):
-                    cmds.append({"tool": "fastboot", "args": ["flash", part, src], "raw": f"flash {part} ← {os.path.basename(src)}"})
+                    cmds.append(
+                        {
+                            "tool": "fastboot",
+                            "args": ["flash", part, src],
+                            "raw": f"flash {part} ← {os.path.basename(src)}",
+                        }
+                    )
                 break
         if ab:
             cmds.append({"tool": "fastboot", "args": ["--set-active", "a"], "raw": "set_active a"})
@@ -450,13 +497,13 @@ class FastbootClient:
 
     def parse_payload(self, payload_path: str, line_cb=None) -> dict:
         from .payload_dumper import is_payload
+
         if not is_payload(payload_path):
             raise FastbootError("不是有效的 payload.bin 文件")
-        out = os.path.join(
-            os.path.dirname(os.path.abspath(payload_path)), ".payload_extracted"
-        )
+        out = os.path.join(os.path.dirname(os.path.abspath(payload_path)), ".payload_extracted")
         if not os.path.isdir(out) or not os.listdir(out):
             from .payload_dumper import extract
+
             if line_cb:
                 line_cb("正在解包 payload.bin（全量包较大，可能耗时数分钟）...")
             extract(payload_path, out, line_cb=line_cb)
@@ -464,6 +511,7 @@ class FastbootClient:
 
     def parse_zip(self, zip_path: str, line_cb=None) -> dict:
         import zipfile
+
         name = os.path.basename(zip_path)
         out = os.path.join(
             os.path.dirname(os.path.abspath(zip_path)),
@@ -512,9 +560,7 @@ class FastbootClient:
                             continue
                         if zstd is None:
                             zstd = self._find_zstd()
-                        dst = os.path.join(
-                            tmp_root, os.path.basename(a)[: -len(".zst")]
-                        )
+                        dst = os.path.join(tmp_root, os.path.basename(a)[: -len(".zst")])
                         if not os.path.isfile(dst):
                             subprocess.run(
                                 [zstd, "-d", a, "-o", dst],

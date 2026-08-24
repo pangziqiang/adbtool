@@ -57,9 +57,7 @@ class TransferWorker(QThread):
                     self.adb.push(p, os.path.join(self.dest, os.path.basename(p)))
                 else:
                     self.adb.pull(p, os.path.join(self.dest, os.path.basename(p)))
-            self.finished_ok.emit(
-                f"传输到{'手机' if self.kind == 'push' else '电脑'}完成: {len(self.paths)} 项"
-            )
+            self.finished_ok.emit(f"传输到{'手机' if self.kind == 'push' else '电脑'}完成: {len(self.paths)} 项")
         except AdbError as e:
             self.failed.emit(str(e))
 
@@ -109,7 +107,7 @@ class BrewWorker(QThread):
 class DeviceRefreshWorker(QThread):
     """后台刷新设备列表与设备信息，避免阻塞 UI。"""
 
-    done = pyqtSignal(list, int)   # ([(serial, label)], 总设备数)
+    done = pyqtSignal(list, int)  # ([(serial, label)], 总设备数)
     failed = pyqtSignal(str)
 
     def __init__(self, adb: AdbClient, parent=None):
@@ -247,9 +245,7 @@ class MainWindow(QMainWindow):
     def _build_device_info(self):
         self.device_info_frame = QFrame(self)
         self.device_info_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.device_info_frame.setStyleSheet(
-            "QFrame { background: #2b2b2b; border-bottom: 1px solid #444; }"
-        )
+        self.device_info_frame.setStyleSheet("QFrame { background: #2b2b2b; border-bottom: 1px solid #444; }")
         self.device_info_frame.setMaximumHeight(120)
         self.device_info_labels = {}
         layout = QHBoxLayout(self.device_info_frame)
@@ -316,9 +312,7 @@ class MainWindow(QMainWindow):
 
         if info.storage_total:
             if info.storage_free and info.storage_total:
-                self.device_info_labels["storage"].setText(
-                    f"{info.storage_free} 可用 / {info.storage_total}"
-                )
+                self.device_info_labels["storage"].setText(f"{info.storage_free} 可用 / {info.storage_total}")
             else:
                 self.device_info_labels["storage"].setText(info.storage_total)
         else:
@@ -464,13 +458,9 @@ class MainWindow(QMainWindow):
                 self.adb.device = ""
                 self.phone_panel.clear_content()
             if total:
-                self.statusBar().showMessage(
-                    f"{total} 台设备离线（可能已断开连接），请重新连接后刷新"
-                )
+                self.statusBar().showMessage(f"{total} 台设备离线（可能已断开连接），请重新连接后刷新")
             else:
-                self.statusBar().showMessage(
-                    "未检测到设备：请确认手机开启 USB 调试、已授权，无线连接时手机勿锁屏"
-                )
+                self.statusBar().showMessage("未检测到设备：请确认手机开启 USB 调试、已授权，无线连接时手机勿锁屏")
 
     def _on_device_refresh_failed(self, msg):
         self.refresh_devices_btn.setEnabled(True)
@@ -535,9 +525,7 @@ class MainWindow(QMainWindow):
         self._worker.finished_ok.connect(lambda _: target.refresh())
         self._worker.failed.connect(lambda m: self.statusBar().showMessage(f"传输失败: {m}"))
         self._worker.start()
-        self.statusBar().showMessage(
-            f"正在传输到{'手机' if kind == 'push' else '电脑'}..."
-        )
+        self.statusBar().showMessage(f"正在传输到{'手机' if kind == 'push' else '电脑'}...")
 
     def _install_apks(self, apks: list[str]):
         if not self.adb.device:
@@ -572,9 +560,7 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if ret != QMessageBox.StandardButton.Yes:
-            QMessageBox.information(
-                self, "安装 scrcpy", "可手动执行：brew install scrcpy"
-            )
+            QMessageBox.information(self, "安装 scrcpy", "可手动执行：brew install scrcpy")
             return
         self._worker = BrewWorker("scrcpy", self)
         self._worker.finished_ok.connect(
@@ -583,9 +569,7 @@ class MainWindow(QMainWindow):
                 self._launch_scrcpy(),
             )
         )
-        self._worker.failed.connect(
-            lambda m: self.statusBar().showMessage(f"安装 scrcpy 失败: {m}")
-        )
+        self._worker.failed.connect(lambda m: self.statusBar().showMessage(f"安装 scrcpy 失败: {m}"))
         self._worker.start()
         self.statusBar().showMessage("正在安装 scrcpy（可能需要几分钟）...")
 
@@ -649,15 +633,9 @@ class MainWindow(QMainWindow):
         if ret != QMessageBox.StandardButton.Yes:
             return
         self.statusBar().showMessage(f"正在重启到 {names.get(mode, mode)} ...")
-        self._reboot_task = AdbTask(
-            lambda: self.adb.reboot(mode), (), self
-        )
-        self._reboot_task.done.connect(
-            lambda _: self.statusBar().showMessage("已发送重启指令")
-        )
-        self._reboot_task.fail.connect(
-            lambda m: self.statusBar().showMessage(f"重启失败: {m}")
-        )
+        self._reboot_task = AdbTask(lambda: self.adb.reboot(mode), (), self)
+        self._reboot_task.done.connect(lambda _: self.statusBar().showMessage("已发送重启指令"))
+        self._reboot_task.fail.connect(lambda m: self.statusBar().showMessage(f"重启失败: {m}"))
         self._reboot_task.start()
 
     def _screenshot(self):
@@ -673,12 +651,8 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage("正在截屏...")
         self._worker = AdbTask(self.adb.screenshot, (dest,), self)
-        self._worker.done.connect(
-            lambda _: self.statusBar().showMessage(f"截屏已保存: {dest}")
-        )
-        self._worker.fail.connect(
-            lambda m: self.statusBar().showMessage(f"截屏失败: {m}")
-        )
+        self._worker.done.connect(lambda _: self.statusBar().showMessage(f"截屏已保存: {dest}"))
+        self._worker.fail.connect(lambda m: self.statusBar().showMessage(f"截屏失败: {m}"))
         self._worker.start()
 
     def _show_help(self):

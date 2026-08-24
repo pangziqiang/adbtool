@@ -115,8 +115,7 @@ class PairDialog(QDialog):
         form.addRow("配对码", self.code_edit)
         lay.addLayout(form)
         hint = QLabel(
-            "手机: 开发者选项 → 无线调试 → 使用配对码配对设备\n"
-            "填入弹出的 IP:端口 和 6 位配对码后点“配对”",
+            "手机: 开发者选项 → 无线调试 → 使用配对码配对设备\n填入弹出的 IP:端口 和 6 位配对码后点“配对”",
             self,
         )
         hint.setWordWrap(True)
@@ -154,9 +153,7 @@ class PairDialog(QDialog):
 # ---------- package manager ----------
 
 
-_CACHE_DIR = os.path.join(
-    os.path.expanduser("~/Library/Application Support"), "adbtool", "pkg_cache"
-)
+_CACHE_DIR = os.path.join(os.path.expanduser("~/Library/Application Support"), "adbtool", "pkg_cache")
 _APK_SIZE_LIMIT = 200 * 1024 * 1024
 
 
@@ -185,7 +182,7 @@ def _parse_apk(aapt: str, apk: str) -> tuple[str, bytes]:
             if line.startswith("application-label:") and not label:
                 label = line.split(":", 1)[1].strip().strip("'")
             elif line.startswith("application-icon-"):
-                rest = line[len("application-icon-"):]
+                rest = line[len("application-icon-") :]
                 dpi, _, path = rest.partition(":")
                 if path.strip().strip("'"):
                     icons.append((int(dpi), path.strip().strip("'")))
@@ -200,8 +197,7 @@ def _parse_apk(aapt: str, apk: str) -> tuple[str, bytes]:
             names = [
                 n
                 for n in z.namelist()
-                if n.lower().endswith(".png")
-                and ("ic_launcher" in n.lower() or "/mipmap" in n.lower())
+                if n.lower().endswith(".png") and ("ic_launcher" in n.lower() or "/mipmap" in n.lower())
             ]
             for n in sorted(names):
                 try:
@@ -217,10 +213,9 @@ def _parse_apk(aapt: str, apk: str) -> tuple[str, bytes]:
                     continue
                 try:
                     data = z.read(n)
-                    if (
-                        data[:4] == b"\x89PNG"
-                        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
-                    ) and len(data) > best[0]:
+                    if (data[:4] == b"\x89PNG" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")) and len(data) > best[
+                        0
+                    ]:
                         best = (len(data), data)
                 except Exception:
                     continue
@@ -236,9 +231,7 @@ class EnrichWorker(QThread):
     progress = pyqtSignal(int, int)
     finished = pyqtSignal()
 
-    def __init__(
-        self, adb: AdbClient, packages: list[str], parent=None, system_only: bool = False
-    ):
+    def __init__(self, adb: AdbClient, packages: list[str], parent=None, system_only: bool = False):
         super().__init__(parent)
         self.adb = adb
         self.packages = packages
@@ -266,9 +259,7 @@ class EnrichWorker(QThread):
             done = 0
             with ThreadPoolExecutor(max_workers=nw) as ex:
                 futures = {
-                    ex.submit(
-                        self._process_one, pkg, aapt, paths.get(pkg, ""), tmpdir, cdir
-                    ): pkg
+                    ex.submit(self._process_one, pkg, aapt, paths.get(pkg, ""), tmpdir, cdir): pkg
                     for pkg in self.packages
                 }
                 for fut in as_completed(futures):
@@ -324,9 +315,7 @@ class EnrichWorker(QThread):
             except Exception:
                 pass
         if apk:
-            tmp = os.path.join(
-                tmpdir, hashlib.md5(pkg.encode()).hexdigest() + ".apk"
-            )
+            tmp = os.path.join(tmpdir, hashlib.md5(pkg.encode()).hexdigest() + ".apk")
             try:
                 with self._adb_lock:
                     self.adb._run_transfer(["pull", apk, tmp])
@@ -428,9 +417,7 @@ class PackageDialog(QDialog):
         self._apply_filter()
         self._enrich = EnrichWorker(self.adb, sorted(user), self)
         self._enrich.updated.connect(self._on_enrich)
-        self._enrich.progress.connect(
-            lambda i, t: self.status.setText(f"正在加载应用信息 {i}/{t}...")
-        )
+        self._enrich.progress.connect(lambda i, t: self.status.setText(f"正在加载应用信息 {i}/{t}..."))
         self._enrich.finished.connect(self._on_enrich_done)
         self._enrich.start()
 
@@ -438,23 +425,15 @@ class PackageDialog(QDialog):
         if idx == 1 and not self._sys_enriched:
             self._sys_enriched = True
             pkgs = sorted(self._list_pkgs.get(self.sys_list, ()))
-            self._enrich_sys = EnrichWorker(
-                self.adb, pkgs, self, system_only=True
-            )
+            self._enrich_sys = EnrichWorker(self.adb, pkgs, self, system_only=True)
             self._enrich_sys.updated.connect(self._on_enrich)
-            self._enrich_sys.progress.connect(
-                lambda i, t: self.status.setText(
-                    f"正在加载系统应用信息 {i}/{t}..."
-                )
-            )
+            self._enrich_sys.progress.connect(lambda i, t: self.status.setText(f"正在加载系统应用信息 {i}/{t}..."))
             self._enrich_sys.finished.connect(self._on_enrich_done)
             self._enrich_sys.start()
 
     def _on_enrich_done(self):
         others = [
-            w
-            for w in (self._enrich, self._enrich_sys)
-            if w is not None and w is not self.sender() and w.isRunning()
+            w for w in (self._enrich, self._enrich_sys) if w is not None and w is not self.sender() and w.isRunning()
         ]
         if not others:
             self.status.setText("应用信息加载完成")
@@ -486,11 +465,7 @@ class PackageDialog(QDialog):
                     )
                 )
                 return
-        item.setIcon(
-            QApplication.style().standardIcon(
-                QStyle.StandardPixmap.SP_FileIcon
-            )
-        )
+        item.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
 
     def _apply_filter(self, *_):
         q = self.search.text().strip().lower()
@@ -533,10 +508,7 @@ class PackageDialog(QDialog):
         pkg = self._current()
         if not pkg:
             return
-        if (
-            QMessageBox.question(self, "卸载", f"确定卸载 {pkg} 吗？")
-            != QMessageBox.StandardButton.Yes
-        ):
+        if QMessageBox.question(self, "卸载", f"确定卸载 {pkg} 吗？") != QMessageBox.StandardButton.Yes:
             return
         self.status.setText(f"正在卸载 {pkg}...")
         self._run_task(self.adb.uninstall, (pkg,), lambda _: self._load())
@@ -555,10 +527,7 @@ class PackageDialog(QDialog):
         pkg = self._current()
         if not pkg:
             return
-        if (
-            QMessageBox.question(self, "清数据", f"确定清除 {pkg} 的所有数据吗？")
-            != QMessageBox.StandardButton.Yes
-        ):
+        if QMessageBox.question(self, "清数据", f"确定清除 {pkg} 的所有数据吗？") != QMessageBox.StandardButton.Yes:
             return
         self.status.setText(f"正在清除 {pkg} 数据...")
         self._run_task(self.adb.clear_app, (pkg,), lambda _: None)
@@ -588,9 +557,7 @@ class LogcatReader(QThread):
             cmd += ["-s", self.adb.device]
         cmd += ["logcat", "-v", "threadtime", "-d", "*:V"]
         try:
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-            )
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         except OSError as e:
             self.line.emit(f"[错误] {e}")
             self.done.emit(0)
@@ -695,9 +662,7 @@ class LogcatDialog(QDialog):
         if not m:
             return
         t, pid, tid, lv, tag, msg = m.groups()
-        self._rows.append(
-            {"time": t, "pid": pid, "tid": tid, "level": lv, "tag": tag, "msg": msg}
-        )
+        self._rows.append({"time": t, "pid": pid, "tid": tid, "level": lv, "tag": tag, "msg": msg})
 
     def _on_done(self, count: int):
         self._grabbing = False
@@ -748,9 +713,7 @@ class LogcatDialog(QDialog):
         self.model.clear()
         for i in self._filtered:
             r = self._rows[i]
-            text = (
-                f"{r['time']} {r['pid']} {r['level']}/{r['tag']}: {r['msg']}"
-            )
+            text = f"{r['time']} {r['pid']} {r['level']}/{r['tag']}: {r['msg']}"
             item = QStandardItem(text)
             item.setEditable(False)
             item.setToolTip(text)
@@ -766,12 +729,8 @@ class LogcatDialog(QDialog):
         if not self.model.rowCount():
             QMessageBox.information(self, "导出", "当前没有可导出的日志")
             return
-        default = os.path.join(
-            _SAVE_DIR, f"logcat_{datetime.now():%Y%m%d_%H%M%S}.txt"
-        )
-        path, _ = QFileDialog.getSaveFileName(
-            self, "导出日志", default, "文本文件 (*.txt)"
-        )
+        default = os.path.join(_SAVE_DIR, f"logcat_{datetime.now():%Y%m%d_%H%M%S}.txt")
+        path, _ = QFileDialog.getSaveFileName(self, "导出日志", default, "文本文件 (*.txt)")
         if not path:
             return
         lines = [self.model.item(i).text() for i in range(self.model.rowCount())]
@@ -829,8 +788,7 @@ class RecordDialog(QDialog):
                 QMessageBox.warning(
                     self,
                     "格式提示",
-                    f"已保存到:\n{dest}\n\n"
-                    "该文件为流式 MP4，若播放异常，可安装 ffmpeg 或使用 VLC 播放。",
+                    f"已保存到:\n{dest}\n\n该文件为流式 MP4，若播放异常，可安装 ffmpeg 或使用 VLC 播放。",
                 )
                 self.accept()
         except AdbError as e:
@@ -997,17 +955,13 @@ QCheckBox::indicator:unchecked {{ image: url("{off_img}"); }}"""
         self.status.setText(f"正在{'开启' if cb.isChecked() else '关闭'} {name}...")
         self._t = AdbTask(fn, (), self)
         self._t.done.connect(lambda _, c=cb: self._on_toggle_done(c))
-        self._t.fail.connect(
-            lambda m, c=cb: self._on_toggle_fail(c, m)
-        )
+        self._t.fail.connect(lambda m, c=cb: self._on_toggle_fail(c, m))
         self._t.start()
 
     def _on_toggle_done(self, cb: QCheckBox):
         self._busy.discard(cb)
         cb.setEnabled(True)
-        self.status.setText(
-            f"已{'开启' if cb.isChecked() else '关闭'}"
-        )
+        self.status.setText(f"已{'开启' if cb.isChecked() else '关闭'}")
 
     def _on_toggle_fail(self, cb: QCheckBox, msg: str):
         self._busy.discard(cb)
@@ -1025,15 +979,11 @@ QCheckBox::indicator:unchecked {{ image: url("{off_img}"); }}"""
         self._apply_toggle(self.bt, lambda: self.adb.set_bluetooth(on), "蓝牙")
 
     def _set_stay(self, on: bool):
-        self._apply_toggle(
-            self.stay, lambda: self.adb.set_stay_awake(on), "充电常亮"
-        )
+        self._apply_toggle(self.stay, lambda: self.adb.set_stay_awake(on), "充电常亮")
 
     def _apply_scale(self):
         self.status.setText("正在设置动画缩放...")
-        self._t = AdbTask(
-            lambda: self.adb.set_anim_scale(self.scale.value()), (), self
-        )
+        self._t = AdbTask(lambda: self.adb.set_anim_scale(self.scale.value()), (), self)
         self._t.done.connect(lambda _: self.status.setText("已应用动画缩放"))
         self._t.fail.connect(lambda m: self.status.setText(f"设置失败: {m}"))
         self._t.start()
@@ -1159,9 +1109,23 @@ class FastbootDialog(QDialog):
         grp_q.addWidget(QLabel("快捷刷入", tab_part))
         self.quick_combo = QComboBox(tab_part)
         self.quick_combo.addItems(
-            ["boot", "boot_a", "boot_b", "init_boot", "init_boot_a",
-             "recovery", "vendor_boot", "vendor_boot_a", "dtbo",
-             "vbmeta", "vbmeta_system", "modem", "system", "vendor", "super"]
+            [
+                "boot",
+                "boot_a",
+                "boot_b",
+                "init_boot",
+                "init_boot_a",
+                "recovery",
+                "vendor_boot",
+                "vendor_boot_a",
+                "dtbo",
+                "vbmeta",
+                "vbmeta_system",
+                "modem",
+                "system",
+                "vendor",
+                "super",
+            ]
         )
         self.quick_combo.setToolTip("选择要刷入的常用分区")
         self.quick_img_btn = QPushButton("选镜像…", tab_part)
@@ -1185,21 +1149,11 @@ class FastbootDialog(QDialog):
 
         self.part_browser = QTableWidget(tab_part)
         self.part_browser.setColumnCount(4)
-        self.part_browser.setHorizontalHeaderLabels(
-            ["", "分区名", "镜像文件", "选择镜像"]
-        )
-        self.part_browser.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.part_browser.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.part_browser.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch
-        )
-        self.part_browser.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self.part_browser.setHorizontalHeaderLabels(["", "分区名", "镜像文件", "选择镜像"])
+        self.part_browser.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.part_browser.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.part_browser.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.part_browser.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.part_browser.setMaximumHeight(0)
         self.part_browser._part_map = {}
         vp.addWidget(self.part_browser)
@@ -1216,24 +1170,12 @@ class FastbootDialog(QDialog):
         # Partition table
         self.part_table = QTableWidget(tab_part)
         self.part_table.setColumnCount(5)
-        self.part_table.setHorizontalHeaderLabels(
-            ["刷入", "分区", "镜像文件", "操作", "进度"]
-        )
-        self.part_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.part_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.part_table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch
-        )
-        self.part_table.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.part_table.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.Fixed
-        )
+        self.part_table.setHorizontalHeaderLabels(["刷入", "分区", "镜像文件", "操作", "进度"])
+        self.part_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.part_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.part_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.part_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.part_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.part_table.setColumnWidth(4, 120)
         vp.addWidget(self.part_table)
 
@@ -1257,9 +1199,7 @@ class FastbootDialog(QDialog):
         tab_pkg = QWidget(self)
         vk = QVBoxLayout(tab_pkg)
 
-        hint = QLabel(
-            "选择完整刷机包（解压目录 / 卡刷 zip / payload.bin），解析后一键刷入。", tab_pkg
-        )
+        hint = QLabel("选择完整刷机包（解压目录 / 卡刷 zip / payload.bin），解析后一键刷入。", tab_pkg)
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#888;")
         vk.addWidget(hint)
@@ -1328,9 +1268,7 @@ class FastbootDialog(QDialog):
     def _refresh(self):
         self.refresh_btn.setEnabled(False)
         self.status.setText("正在检测 fastboot 设备...")
-        self._worker = FastbootWorker(
-            lambda cb, ui: self._do_refresh(cb), self
-        )
+        self._worker = FastbootWorker(lambda cb, ui: self._do_refresh(cb), self)
         self._worker.done.connect(self._on_refresh)
         self._worker.fail.connect(self._on_fail)
         self._worker.start()
@@ -1380,16 +1318,13 @@ class FastbootDialog(QDialog):
         self._worker.start()
 
     def _browse_pkg(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "选择刷机包目录", os.path.expanduser("~/Downloads")
-        )
+        path = QFileDialog.getExistingDirectory(self, "选择刷机包目录", os.path.expanduser("~/Downloads"))
         if path:
             self.pkg_edit.setText(path)
 
     def _browse_pkg_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择卡刷包", os.path.expanduser("~/Downloads"),
-            "卡刷包 (*.zip *.bin);;所有文件 (*)"
+            self, "选择卡刷包", os.path.expanduser("~/Downloads"), "卡刷包 (*.zip *.bin);;所有文件 (*)"
         )
         if path:
             self.pkg_edit.setText(path)
@@ -1436,14 +1371,13 @@ class FastbootDialog(QDialog):
                 continue
             fi = args.index("flash")
             img = ""
-            for a in args[fi + 1:]:
+            for a in args[fi + 1 :]:
                 if a.endswith(
-                    (".img", ".img.zst", ".lz4", ".zip", ".dat",
-                     ".elf", ".melf", ".mbn", ".bin", ".fv", ".txt")
+                    (".img", ".img.zst", ".lz4", ".zip", ".dat", ".elf", ".melf", ".mbn", ".bin", ".fv", ".txt")
                 ):
                     img = a
             part = ""
-            for a in args[fi + 1:]:
+            for a in args[fi + 1 :]:
                 if a.startswith("-"):
                     continue
                 if a == img:
@@ -1460,8 +1394,7 @@ class FastbootDialog(QDialog):
         rd = result["right_device"]
         ab = "A/B 双槽" if result["ab"] else "A-only"
         self.status.setText(
-            f"已解析刷机包（{ab}）{len(self._cmds)} 条命令 / {len(seen)} 个分区"
-            + (f"，机型: {rd}" if rd else "")
+            f"已解析刷机包（{ab}）{len(self._cmds)} 条命令 / {len(seen)} 个分区" + (f"，机型: {rd}" if rd else "")
         )
         if rd and self.device_codename and rd != self.device_codename:
             QMessageBox.warning(
@@ -1499,12 +1432,8 @@ class FastbootDialog(QDialog):
         row = self.part_table.rowCount()
         self.part_table.insertRow(row)
         ck = QTableWidgetItem()
-        ck.setFlags(
-            Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
-        )
-        ck.setCheckState(
-            Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
-        )
+        ck.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        ck.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         self.part_table.setItem(row, 0, ck)
         self.part_table.setItem(row, 1, QTableWidgetItem(part))
         img_item = QTableWidgetItem(img)
@@ -1521,9 +1450,7 @@ class FastbootDialog(QDialog):
         self.part_table.setCellWidget(row, 4, bar)
 
     def _remove_part_rows(self):
-        rows = sorted(
-            {i.row() for i in self.part_table.selectedItems()}, reverse=True
-        )
+        rows = sorted({i.row() for i in self.part_table.selectedItems()}, reverse=True)
         for r in rows:
             self.part_table.removeRow(r)
         self._resize_table_to_rows()
@@ -1545,8 +1472,7 @@ class FastbootDialog(QDialog):
 
     def _quick_pick(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择镜像", os.path.expanduser("~/Desktop"),
-            "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
+            self, "选择镜像", os.path.expanduser("~/Desktop"), "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
         )
         if path:
             self.quick_path = path
@@ -1561,8 +1487,6 @@ class FastbootDialog(QDialog):
         self._insert_part_row(part, self.quick_path)
         self._resize_table_to_rows()
         self.status.setText(f"已加入 {part} ← {os.path.basename(self.quick_path)}")
-
-
 
     # -- Visual partition flash methods --
     def _read_partitions(self):
@@ -1607,8 +1531,7 @@ class FastbootDialog(QDialog):
 
     def _browse_part_img(self, row):
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择镜像", os.path.expanduser("~/Desktop"),
-            "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
+            self, "选择镜像", os.path.expanduser("~/Desktop"), "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
         )
         if path:
             self.part_browser.item(row, 2).setText(path)
@@ -1633,9 +1556,7 @@ class FastbootDialog(QDialog):
 
     def _add_img_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "选择镜像文件",
-            os.path.expanduser("~/Desktop"),
-            "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
+            self, "选择镜像文件", os.path.expanduser("~/Desktop"), "镜像文件 (*.img *.img.zst *.lz4);;所有文件 (*)"
         )
         if not files:
             return
@@ -1645,7 +1566,7 @@ class FastbootDialog(QDialog):
             part = name.lower()
             for suffix in (".img", ".img.zst", ".lz4"):
                 if part.endswith(suffix):
-                    part = part[:-len(suffix)]
+                    part = part[: -len(suffix)]
                     break
             for prefix in ("image-", "flash_"):
                 part = part.removeprefix(prefix)
@@ -1653,6 +1574,7 @@ class FastbootDialog(QDialog):
             count += 1
         self._resize_table_to_rows()
         self.status.setText("已添加 " + str(count) + " 个镜像")
+
     def _load_pkg_rows(self):
         self._start_parse()
 
@@ -1676,10 +1598,7 @@ class FastbootDialog(QDialog):
             self.status.setText(f"镜像文件不存在: {bad[0]}")
             return
         wipe = self.wipe_combo.currentText() == "清除数据刷机"
-        msg = (
-            f"将按顺序刷入 {len(rows)} 个分区：\n\n"
-            + "\n".join(f"  {p} ← {os.path.basename(i)}" for r, p, i in rows)
-        )
+        msg = f"将按顺序刷入 {len(rows)} 个分区：\n\n" + "\n".join(f"  {p} ← {os.path.basename(i)}" for r, p, i in rows)
         if wipe:
             msg += "\n\n警告: 模式：清除数据刷机\n刷完后将擦除 userdata、metadata，"
             msg += "手机上所有数据都会丢失且不可恢复！"
@@ -1749,7 +1668,9 @@ class FastbootDialog(QDialog):
             msg += "\n\n警告: 将擦除 userdata、metadata，手机上所有数据都会丢失且不可恢复！"
         msg += "\n\n刷写中不要断开 USB！确定继续？"
         ret = QMessageBox.warning(
-            self, "确认完整刷入", msg,
+            self,
+            "确认完整刷入",
+            msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if ret != QMessageBox.StandardButton.Yes:
@@ -1762,6 +1683,7 @@ class FastbootDialog(QDialog):
             def prog(i, total, raw):
                 ui(("status", f"完整刷入中 {i}/{total}"))
                 cb(raw)
+
             self.fb.run_package(self._cmds, line_cb=cb, progress_cb=prog)
             if wipe:
                 for w in ("userdata", "metadata"):
@@ -1860,7 +1782,9 @@ class FastbootDialog(QDialog):
         else:
             fn = lambda cb, ui: self.fb.reboot(action, line_cb=cb)
         self._worker = FastbootWorker(fn, self)
-        self._worker.done.connect(lambda _: (self.reboot_btn.setEnabled(True), self.status.setText(f"OK 已发送重启指令（{action}）"))[1])
+        self._worker.done.connect(
+            lambda _: (self.reboot_btn.setEnabled(True), self.status.setText(f"OK 已发送重启指令（{action}）"))[1]
+        )
         self._worker.fail.connect(self._on_fail)
         self._worker.start()
 

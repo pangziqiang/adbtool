@@ -56,6 +56,7 @@ class TestAdbClient(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
 class TestRunTransfer(unittest.TestCase):
     def _client(self):
         c = AdbClient.__new__(AdbClient)

@@ -44,7 +44,6 @@ class DeviceInfo:
     miui_version: str = ""
 
 
-
 class AdbClient:
     def __init__(self, adb_path: str | None = None):
         self.adb_path = adb_path or self._find_adb()
@@ -84,9 +83,7 @@ class AdbClient:
             cmd += ["-s", self._device]
         cmd += args
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout, check=False
-            )
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             raise AdbError(f"adb 命令超时: {' '.join(cmd[1:3])}") from None
         if check and proc.returncode != 0:
@@ -168,8 +165,11 @@ class AdbClient:
         cmd += args
         master, slave = pty.openpty()
         proc = subprocess.Popen(
-            cmd, stdout=slave, stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL, close_fds=True,
+            cmd,
+            stdout=slave,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            close_fds=True,
         )
         os.close(slave)
         buf = b""
@@ -306,7 +306,10 @@ class AdbClient:
     def pair_wireless(self, host_port: str, code: str) -> str:
         proc = subprocess.run(
             [self.adb_path, "pair", host_port, code],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         if proc.returncode != 0:
             raise AdbError(proc.stderr.strip() or proc.stdout.strip())
@@ -315,7 +318,10 @@ class AdbClient:
     def connect_wireless(self, host_port: str) -> str:
         proc = subprocess.run(
             [self.adb_path, "connect", host_port],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         if proc.returncode != 0:
             raise AdbError(proc.stderr.strip() or proc.stdout.strip())
@@ -326,9 +332,7 @@ class AdbClient:
 
     # ---------- packages ----------
 
-    def list_packages(
-        self, third_party_only: bool = True, system_only: bool = False
-    ) -> list[str]:
+    def list_packages(self, third_party_only: bool = True, system_only: bool = False) -> list[str]:
         if system_only:
             flag = " -s"
         elif third_party_only:
@@ -336,11 +340,7 @@ class AdbClient:
         else:
             flag = ""
         out = self._run(["shell", f"pm list packages{flag}".strip()])
-        return [
-            line.split("package:", 1)[-1].strip()
-            for line in out.splitlines()
-            if line.startswith("package:")
-        ]
+        return [line.split("package:", 1)[-1].strip() for line in out.splitlines() if line.startswith("package:")]
 
     def list_package_paths(self, system_only: bool = False) -> dict[str, str]:
         flag = " -s" if system_only else " -3"
@@ -349,7 +349,7 @@ class AdbClient:
         for line in out.splitlines():
             if not line.startswith("package:"):
                 continue
-            body = line[len("package:"):]
+            body = line[len("package:") :]
             path, _, pkg = body.rpartition("=")
             if pkg and path:
                 mapping[pkg] = path
@@ -388,9 +388,7 @@ class AdbClient:
         if self._device:
             cmd += ["-s", self._device]
         cmd += ["shell", "screenrecord", "--time-limit", "1800", remote_path]
-        self._rec_proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        self._rec_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return remote_path
 
     def stop_recording(self) -> None:
@@ -431,11 +429,7 @@ class AdbClient:
 
     def set_bluetooth(self, on: bool) -> None:
         action = "enable" if on else "disable"
-        shell_cmd = (
-            f'su -c "cmd bluetooth_manager {action}"'
-            if self._has_su()
-            else f"cmd bluetooth_manager {action}"
-        )
+        shell_cmd = f'su -c "cmd bluetooth_manager {action}"' if self._has_su() else f"cmd bluetooth_manager {action}"
         cmd = [self.adb_path]
         if self._device:
             cmd += ["-s", self._device]
@@ -457,9 +451,7 @@ class AdbClient:
         return False
 
     def get_bluetooth_state(self) -> bool:
-        out = self._run(
-            ["shell", "dumpsys bluetooth_manager"], check=False
-        )
+        out = self._run(["shell", "dumpsys bluetooth_manager"], check=False)
         for line in out.splitlines():
             if "State:" in line:
                 return "ON" in line.split("State:", 1)[1].upper()
@@ -498,9 +490,7 @@ class AdbClient:
             "transition_animation_scale",
             "animator_duration_scale",
         ):
-            self._run(
-                ["shell", f"settings put global {key} {scale}"], check=False
-            )
+            self._run(["shell", f"settings put global {key} {scale}"], check=False)
 
     # ---------- reboot ----------
 

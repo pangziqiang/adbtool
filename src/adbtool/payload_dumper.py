@@ -30,10 +30,7 @@ def _arch() -> str:
 
 def _release_url() -> str:
     arch = _arch()
-    return (
-        f"https://github.com/{_REPO}/releases/download/{_VERSION}/"
-        f"payload-dumper-go_{_VERSION}_darwin_{arch}.tar.gz"
-    )
+    return f"https://github.com/{_REPO}/releases/download/{_VERSION}/payload-dumper-go_{_VERSION}_darwin_{arch}.tar.gz"
 
 
 def _sha256_file(path: str) -> str:
