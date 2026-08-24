@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import urllib.request
 import zipfile
@@ -30,8 +31,7 @@ def download_adb(progress=None) -> str:
             if progress:
                 progress(f"正在下载 adb（{url.split('/')[2]}）...")
             _download(url, zip_path)
-            with zipfile.ZipFile(zip_path) as zf:
-                zf.extractall(_SDK_DIR)
+            _safe_extract(zip_path, _SDK_DIR)
             os.remove(zip_path)
             for tool in ("adb", "fastboot"):
                 p = os.path.join(_SDK_DIR, "platform-tools", tool)
@@ -61,3 +61,24 @@ def _download(url: str, dest: str) -> None:
             if not chunk:
                 break
             f.write(chunk)
+
+
+def _safe_extract(zip_path: str, dest: str) -> None:
+    """安全解压：限制条目数与总大小，并阻止 zip-slip 路径穿越。"""
+    base = os.path.abspath(dest)
+    os.makedirs(base, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        infos = zf.infolist()
+        if len(infos) > 5000:
+            raise RuntimeError("zip 条目过多，已中止解压")
+        if sum(m.file_size for m in infos) > 2 * 1024**3:
+            raise RuntimeError("zip 解压总大小超过 2GB，已中止解压")
+        for m in infos:
+            if m.is_dir():
+                continue
+            target = os.path.abspath(os.path.join(base, m.filename))
+            if not target.startswith(base + os.sep):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with zf.open(m) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
