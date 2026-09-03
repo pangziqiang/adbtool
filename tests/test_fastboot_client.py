@@ -69,3 +69,74 @@ class TestFastbootClient(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCustomAbPackage(unittest.TestCase):
+    def setUp(self):
+        self.fb = FastbootClient(fastboot_path="/bin/echo")
+
+    def _make(self, td, files, subdirs=None):
+        for n in files:
+            p = os.path.join(td, n)
+            os.makedirs(os.path.dirname(p), exist_ok=True) if os.path.dirname(n) else None
+            with open(p, "wb") as f:
+                f.write(b"x")
+        for sub, boot in (subdirs or {}).items():
+            d = os.path.join(td, sub)
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, boot), "wb") as f:
+                f.write(b"x")
+
+    def test_looks_custom_kernel_ab(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, ["boot.img"], {"Rootkernel": "boot.img"})
+            self.assertTrue(self.fb._looks_custom_kernel_ab(td))
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, ["boot.img", "kernel/boot.img"])
+            self.assertTrue(self.fb._looks_custom_kernel_ab(td))
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, ["boot.img", "recovery.img"])
+            self.assertFalse(self.fb._looks_custom_kernel_ab(td))
+
+    def test_build_custom_ab_cmds(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._make(
+                td,
+                ["init_boot.img", "recovery.img", "vbmeta.img", "vbmeta_system.img", "super.img.zst"],
+                {"Rootkernel": "boot.img", "kernel": "boot.img"},
+            )
+            res = self.fb._build_custom_ab_cmds(td, "sheng")
+            self.assertEqual(res["source"], "custom_ab")
+            self.assertTrue(res["ab"])
+            self.assertEqual(res["right_device"], "sheng")
+            parts = [c["args"][1] for c in res["commands"]]
+            # 顶层镜像刷到 _ab 槽；super 单分区
+            self.assertIn("init_boot_ab", parts)
+            self.assertIn("recovery_ab", parts)
+            self.assertIn("vbmeta_ab", parts)
+            self.assertIn("vbmeta_system_ab", parts)
+            self.assertIn("super", parts)
+            self.assertNotIn("init_boot", parts)  # 不应出现无槽分区名
+            # boot 由内核子目录提供，不自动加入命令
+            self.assertTrue(all("boot" != c["args"][1] for c in res["commands"]))
+            self.assertEqual(len(res["boot_choices"]), 2)
+            labels = {b["label"] for b in res["boot_choices"]}
+            self.assertIn("无 Root 官方内核", labels)
+
+    def test_parse_package_detects_custom_ab(self):
+        with tempfile.TemporaryDirectory() as pkg:
+            os.makedirs(os.path.join(pkg, "bin"), exist_ok=True)
+            with open(os.path.join(pkg, "bin", "right_device"), "w") as f:
+                f.write("sheng")
+            images = os.path.join(pkg, "images")
+            os.makedirs(images, exist_ok=True)
+            self._make(
+                images,
+                ["init_boot.img", "recovery.img", "super.img.zst"],
+                {"Rootkernel": "boot.img"},
+            )
+            res = self.fb.parse_package(pkg)
+            self.assertEqual(res["source"], "custom_ab")
+            parts = [c["args"][1] for c in res["commands"]]
+            self.assertIn("init_boot_ab", parts)
+            self.assertEqual(len(res["boot_choices"]), 1)

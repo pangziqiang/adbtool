@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListView,
@@ -1391,13 +1392,45 @@ class FastbootDialog(QDialog):
         result = result[0]
         self._pkg = self.pkg_edit.text().strip()
         self._pkg_meta = result
-        self._cmds = result["commands"]
+        self._cmds = list(result["commands"])
+        boot_choices = result.get("boot_choices") or []
+        if boot_choices:
+            boot_cmd = self._offer_boot_choice(boot_choices)
+            if boot_cmd:
+                self._cmds.append(boot_cmd)
+        self._rebuild_pkg_view(result)
+
+    def _offer_boot_choice(self, boot_choices) -> dict | None:
+        """第三方自定义 ROM：boot 内核需从 Rootkernel/kernel 二选一刷入 boot_ab。"""
+        items = [b["label"] for b in boot_choices]
+        skip_label = "暂不选择，跳过刷入 boot（不推荐）"
+        items.append(skip_label)
+        current = 1 if len(boot_choices) >= 2 else 0  # 默认无 Root 官方内核
+        text, ok = QInputDialog.getItem(
+            self,
+            "选择要刷入的内核",
+            "此刷机包需要把内核刷入 boot_ab，请选择版本：",
+            items,
+            current,
+            False,
+        )
+        if not ok or text == skip_label:
+            self.status.setText("未选择内核，boot 分区将不会被刷入")
+            return None
+        b = boot_choices[items.index(text)]
+        return {
+            "tool": "fastboot",
+            "args": ["flash", "boot_ab", b["path"]],
+            "raw": f"flash boot_ab ← {os.path.basename(b['path'])}",
+        }
+
+    def _rebuild_pkg_view(self, result: dict):
         self.pkg_preview.clear()
         for i, c in enumerate(self._cmds, 1):
             self.pkg_preview.addItem(f"[{i}/{len(self._cmds)}] {c['raw']}")
         self.part_table.setRowCount(0)
         seen = set()
-        for c in result["commands"]:
+        for c in self._cmds:
             args = c["args"]
             if "flash" not in args:
                 continue
@@ -1424,7 +1457,13 @@ class FastbootDialog(QDialog):
             self._insert_part_row(part, img)
         self._resize_table_to_rows()
         rd = result["right_device"]
-        ab = "A/B 双槽" if result["ab"] else "A-only"
+        scheme = result.get("source", "")
+        if scheme == "custom_ab":
+            ab = "自定义 _ab 槽"
+        elif result["ab"]:
+            ab = "A/B 双槽"
+        else:
+            ab = "A-only"
         self.status.setText(
             f"已解析刷机包（{ab}）{len(self._cmds)} 条命令 / {len(seen)} 个分区" + (f"，机型: {rd}" if rd else "")
         )

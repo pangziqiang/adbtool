@@ -411,6 +411,8 @@ class FastbootClient:
             images_dir = out
         if not os.path.isdir(images_dir):
             raise FastbootError("刷机包目录里既没有 flash_all 脚本、payload.bin，也没有 images/ 目录")
+        if not payload and self._looks_custom_kernel_ab(images_dir):
+            return self._build_custom_ab_cmds(images_dir, rd)
         return self._build_images_cmds(images_dir, rd)
 
     @staticmethod
@@ -426,6 +428,87 @@ class FastbootClient:
                 if f == "payload.bin":
                     return os.path.join(root, f)
         return None
+
+    @staticmethod
+    def _looks_custom_kernel_ab(images_dir: str) -> bool:
+        """识别「第三方自定义 ROM」风格：images/ 下有 Rootkernel/ 或 kernel/ 的 boot.img，
+        这类包顶层镜像不带 _ab 后缀，但脚本实际刷到 <分区>_ab（当前槽），boot 需二选一内核。"""
+        for sub in ("Rootkernel", "kernel"):
+            if os.path.isfile(os.path.join(images_dir, sub, "boot.img")):
+                return True
+        return False
+
+    def _build_custom_ab_cmds(self, images_dir: str, rd: str) -> dict:
+        """第三方自定义 ROM：顶层槽位镜像刷到 <分区>_ab，super/cust 单分区；
+        boot 内核在子目录由用户二选一后刷到 boot_ab（通过 boot_choices 交由 UI 处理）。"""
+        files = sorted(os.listdir(images_dir))
+        parts: list[str] = []
+        for f in files:
+            if f.endswith(".img.zst"):
+                base = f[: -len(".img.zst")]
+            elif f.endswith(".img") and os.path.isfile(os.path.join(images_dir, f)):
+                base = f[: -len(".img")]
+            else:
+                continue
+            name = base.removesuffix("_ab")
+            if name in ("super", "cust", "preloader_raw"):
+                continue
+            if name not in parts:
+                parts.append(name)
+
+        def src(name: str) -> str | None:
+            for ext in (".img", ".img.zst"):
+                cand = os.path.join(images_dir, name + ext)
+                if os.path.isfile(cand):
+                    return cand
+            return None
+
+        cmds: list[dict] = []
+        for p in parts:
+            s = src(p)
+            if not s:
+                continue
+            cmds.append(
+                {
+                    "tool": "fastboot",
+                    "args": ["flash", f"{p}_ab", s],
+                    "raw": f"flash {p}_ab ← {os.path.basename(s)}",
+                }
+            )
+        for sp in ("cust", "super"):
+            s = src(sp)
+            if s:
+                cmds.append(
+                    {
+                        "tool": "fastboot",
+                        "args": ["flash", sp, s],
+                        "raw": f"flash {sp} ← {os.path.basename(s)}",
+                    }
+                )
+        for ext in (".img", ".img.zst"):
+            s = os.path.join(images_dir, f"preloader_raw{ext}")
+            if os.path.isfile(s):
+                for part in ("preloader_a", "preloader_b", "preloader1", "preloader2"):
+                    cmds.append(
+                        {
+                            "tool": "fastboot",
+                            "args": ["flash", part, s],
+                            "raw": f"flash {part} ← {os.path.basename(s)}",
+                        }
+                    )
+                break
+        boot_choices: list[dict] = []
+        for label, sub in (("Root 内核（KernelSU）", "Rootkernel"), ("无 Root 官方内核", "kernel")):
+            b = os.path.join(images_dir, sub, "boot.img")
+            if os.path.isfile(b):
+                boot_choices.append({"label": label, "path": b, "dir": sub})
+        return {
+            "commands": cmds,
+            "right_device": rd,
+            "ab": True,
+            "source": "custom_ab",
+            "boot_choices": boot_choices,
+        }
 
     def _build_images_cmds(self, images_dir: str, rd: str) -> dict:
         files = sorted(os.listdir(images_dir))
