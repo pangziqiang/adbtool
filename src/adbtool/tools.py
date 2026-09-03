@@ -1204,7 +1204,6 @@ class FastbootDialog(QDialog):
         grp_flash.addWidget(self.auto_reboot)
         grp_flash.addWidget(self.flash_btn)
         vp.addLayout(grp_flash)
-        self.tabs.addTab(tab_part, "分区刷入")
 
         # ---- 标签②：完整包刷入 ----
         tab_pkg = QWidget(self)
@@ -1276,6 +1275,7 @@ class FastbootDialog(QDialog):
         grp_pkg.addWidget(self.pkg_flash_btn)
         vk.addLayout(grp_pkg)
         self.tabs.addTab(tab_pkg, "完整包刷入")
+        self.tabs.addTab(tab_part, "分区刷入")
 
         # 底部共享条：输出区 + 设备与重启（分区刷入 / 完整包刷入 共用，位于右下角）
         self.output = QListWidget(self)
