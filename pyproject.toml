@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "adbtool"
-version = "0.1.0"
+version = "0.2.0"
 description = "Android ADB 综合工具箱：文件管理、应用管理、投屏、刷机"
 requires-python = ">=3.9"
 dependencies = ["PyQt6>=6.6"]
