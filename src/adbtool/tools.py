@@ -1401,27 +1401,30 @@ class FastbootDialog(QDialog):
         self._rebuild_pkg_view(result)
 
     def _offer_boot_choice(self, boot_choices) -> dict | None:
-        """第三方自定义 ROM：boot 内核需从 Rootkernel/kernel 二选一刷入 boot_ab。"""
+        """第三方自定义 ROM：内核需从 Root/NORoot（或 Rootkernel/kernel）二选一，
+        刷入 boot_ab 或 init_boot_ab（由包内子目录里的镜像名决定）。"""
         items = [b["label"] for b in boot_choices]
-        skip_label = "暂不选择，跳过刷入 boot（不推荐）"
+        skip_label = "暂不选择，跳过刷入内核（不推荐）"
         items.append(skip_label)
         current = 1 if len(boot_choices) >= 2 else 0  # 默认无 Root 官方内核
+        target = boot_choices[0].get("part", "boot_ab")
         text, ok = QInputDialog.getItem(
             self,
             "选择要刷入的内核",
-            "此刷机包需要把内核刷入 boot_ab，请选择版本：",
+            f"此刷机包需要把内核刷入 {target}，请选择版本：",
             items,
             current,
             False,
         )
         if not ok or text == skip_label:
-            self.status.setText("未选择内核，boot 分区将不会被刷入")
+            self.status.setText("未选择内核，内核分区将不会被刷入")
             return None
         b = boot_choices[items.index(text)]
+        part = b.get("part", "boot_ab")
         return {
             "tool": "fastboot",
-            "args": ["flash", "boot_ab", b["path"]],
-            "raw": f"flash boot_ab ← {os.path.basename(b['path'])}",
+            "args": ["flash", part, b["path"]],
+            "raw": f"flash {part} ← {os.path.basename(b['path'])}",
         }
 
     def _rebuild_pkg_view(self, result: dict):

@@ -140,3 +140,97 @@ class TestCustomAbPackage(unittest.TestCase):
             parts = [c["args"][1] for c in res["commands"]]
             self.assertIn("init_boot_ab", parts)
             self.assertEqual(len(res["boot_choices"]), 1)
+
+    def test_looks_custom_kernel_ab_root_init_boot(self):
+        # 裴月笙风格：images/Root|NORoot/init_boot.img，内核二选一刷 init_boot_ab
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, [], {"Root": "init_boot.img", "NORoot": "init_boot.img"})
+            self.assertTrue(self.fb._looks_custom_kernel_ab(td))
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, ["init_boot.img"], {"Root": "init_boot.img"})
+            self.assertTrue(self.fb._looks_custom_kernel_ab(td))
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, ["init_boot.img", "recovery.img"], {"firmware": "vbmeta.img"})
+            self.assertFalse(self.fb._looks_custom_kernel_ab(td))
+
+    def test_build_custom_ab_cmds_root_init_boot(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._make(
+                td,
+                ["boot.img", "init_boot.img", "recovery.img", "vbmeta.img", "vbmeta_system.img", "super.img.zst"],
+                {"Root": "init_boot.img", "NORoot": "init_boot.img"},
+            )
+            res = self.fb._build_custom_ab_cmds(td, "sheng")
+            self.assertEqual(res["source"], "custom_ab")
+            parts = [c["args"][1] for c in res["commands"]]
+            self.assertIn("boot_ab", parts)
+            self.assertIn("init_boot_ab", parts)
+            self.assertIn("recovery_ab", parts)
+            self.assertIn("super", parts)
+            # 子目录内核不自动加入命令，交给 UI 二选一
+            self.assertTrue(all("init_boot" != c["args"][1] for c in res["commands"]))
+            self.assertEqual([b["part"] for b in res["boot_choices"]], ["init_boot_ab", "init_boot_ab"])
+            self.assertEqual([b["label"] for b in res["boot_choices"]], ["Root 内核（KernelSU）", "无 Root 官方内核"])
+
+    def test_parse_package_detects_root_init_boot(self):
+        with tempfile.TemporaryDirectory() as pkg:
+            os.makedirs(os.path.join(pkg, "bin"), exist_ok=True)
+            with open(os.path.join(pkg, "bin", "right_device"), "w") as f:
+                f.write("sheng")
+            images = os.path.join(pkg, "images")
+            os.makedirs(images, exist_ok=True)
+            self._make(
+                images,
+                ["boot.img", "init_boot.img", "super.img.zst"],
+                {"Root": "init_boot.img", "NORoot": "init_boot.img"},
+            )
+            res = self.fb.parse_package(pkg)
+            self.assertEqual(res["source"], "custom_ab")
+            self.assertEqual(res["right_device"], "sheng")
+            parts = [c["args"][1] for c in res["commands"]]
+            self.assertIn("boot_ab", parts)
+            self.assertIn("init_boot_ab", parts)
+            self.assertEqual(len(res["boot_choices"]), 2)
+
+    def test_traverse_arbitrary_kernel_dir_names(self):
+        # 目录名不固定：中文 / 自定义命名也要能按关键字归类
+        with tempfile.TemporaryDirectory() as td:
+            self._make(
+                td,
+                ["init_boot.img", "super.img.zst"],
+                {"有Root内核": "init_boot.img", "官方原厂": "init_boot.img"},
+            )
+            res = self.fb._build_kernel_choices(td)
+            self.assertEqual(
+                [(b["label"], b["part"], b["dir"]) for b in res],
+                [
+                    ("Root 内核（KernelSU）", "init_boot_ab", "有Root内核"),
+                    ("无 Root 官方内核", "init_boot_ab", "官方原厂"),
+                ],
+            )
+
+    def test_traverse_nested_kernel_dir(self):
+        # 内核放在多层子目录里也要能遍历到
+        with tempfile.TemporaryDirectory() as td:
+            self._make(
+                td,
+                ["boot.img", "super.img.zst"],
+                {"inner/Rootkernel": "boot.img", "inner/kernel": "boot.img"},
+            )
+            res = self.fb._build_kernel_choices(td)
+            self.assertEqual([b["part"] for b in res], ["boot_ab", "boot_ab"])
+            self.assertEqual(
+                [(b["label"], b["dir"]) for b in res],
+                [
+                    ("Root 内核（KernelSU）", "inner/Rootkernel"),
+                    ("无 Root 官方内核", "inner/kernel"),
+                ],
+            )
+
+    def test_traverse_unknown_dir_lists_as_choice(self):
+        # 关键字认不出时，按目录名列出来交给用户判断
+        with tempfile.TemporaryDirectory() as td:
+            self._make(td, ["init_boot.img"], {"aaa": "init_boot.img", "bbb": "init_boot.img"})
+            res = self.fb._build_kernel_choices(td)
+            self.assertEqual(len(res), 2)
+            self.assertTrue(all(b["label"].startswith("内核：") for b in res))

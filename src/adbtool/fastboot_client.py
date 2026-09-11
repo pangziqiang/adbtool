@@ -431,16 +431,103 @@ class FastbootClient:
 
     @staticmethod
     def _looks_custom_kernel_ab(images_dir: str) -> bool:
-        """识别「第三方自定义 ROM」风格：images/ 下有 Rootkernel/ 或 kernel/ 的 boot.img，
-        这类包顶层镜像不带 _ab 后缀，但脚本实际刷到 <分区>_ab（当前槽），boot 需二选一内核。"""
-        for sub in ("Rootkernel", "kernel"):
-            if os.path.isfile(os.path.join(images_dir, sub, "boot.img")):
-                return True
-        return False
+        """识别「第三方自定义 ROM」风格：images/ 子目录（任意层级）里有 boot.img / init_boot.img。
+        这类包顶层镜像不带 _ab 后缀，但脚本实际刷到 <分区>_ab（当前槽），
+        内核（boot/init_boot）由用户在 Root 与无 Root 版之间二选一。"""
+        return bool(FastbootClient._find_kernel_images(images_dir))
+
+    # 会被当作「可二选一内核」的镜像名（顶层同名文件是待刷分区镜像，不算）
+    _KERNEL_IMG_NAMES = ("boot.img", "init_boot.img")
+    # 路径关键字判定「无 Root」优先于「Root」（noroot 里也含 root 子串）
+    _NOROOT_HINTS = (
+        "noroot",
+        "no_root",
+        "no-root",
+        "unroot",
+        "stock",
+        "official",
+        "官方",
+        "原厂",
+        "无root",
+        "无 root",
+        "未root",
+        "未 root",
+    )
+    _ROOT_HINTS = ("kernelsu", "sukisu", "ksu", "magisk", "root", "面具", "修补", "有root", "有 root")
+    # 只写「kernel」的目录按惯例是无 Root 官方内核（优先级低于上面的 root 关键字，
+    # 这样 Rootkernel 仍会被判成 Root）
+    _NOROOT_ONLY_HINTS = ("kernel",)
+    _KERNEL_SKIP_DIRS = frozenset({".git", ".svn", "__pycache__", "node_modules", ".payload_extracted"})
+
+    @staticmethod
+    def _find_kernel_images(images_dir: str, max_depth: int = 3) -> list[dict]:
+        """遍历 images/ 下所有子目录，收集 boot.img / init_boot.img 内核镜像。"""
+        if not os.path.isdir(images_dir):
+            return []
+        root = os.path.abspath(images_dir)
+        found: list[dict] = []
+        for cur, dirs, files in os.walk(root):
+            rel_dir = os.path.relpath(cur, root)
+            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+            dirs[:] = [d for d in dirs if d not in FastbootClient._KERNEL_SKIP_DIRS and not d.startswith(".")]
+            if depth >= max_depth:
+                dirs[:] = []
+            if depth == 0:
+                continue  # 顶层是待刷分区镜像，不是二选一内核
+            for f in files:
+                if f.lower() in FastbootClient._KERNEL_IMG_NAMES:
+                    found.append(
+                        {
+                            "path": os.path.join(cur, f),
+                            "rel": os.path.join(rel_dir, f).replace(os.sep, "/"),
+                            "img": f,
+                            "dir": rel_dir.replace(os.sep, "/"),
+                        }
+                    )
+        return sorted(found, key=lambda e: e["rel"].lower())
+
+    @staticmethod
+    def _classify_kernel(rel: str) -> str:
+        """按路径关键字把内核镜像归类为 root / noroot / unknown。"""
+        low = rel.replace("\\", "/").lower()
+        if any(h in low for h in FastbootClient._NOROOT_HINTS):
+            return "noroot"
+        if any(h in low for h in FastbootClient._ROOT_HINTS):
+            return "root"
+        if any(h in low for h in FastbootClient._NOROOT_ONLY_HINTS):
+            return "noroot"
+        return "unknown"
+
+    def _build_kernel_choices(self, images_dir: str) -> list[dict]:
+        """把遍历到的内核镜像按 Root / 无 Root 归类成二选一选项；认不出则按目录名逐个列出。"""
+        buckets: dict[str, list[dict]] = {"root": [], "noroot": [], "unknown": []}
+        for e in self._find_kernel_images(images_dir):
+            buckets[self._classify_kernel(e["rel"])].append(e)
+        # 同类别里有多个时，优先选与顶层主内核镜像同名的那个
+        top = {f.lower() for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f))}
+        preferred = "init_boot.img" if "init_boot.img" in top else "boot.img"
+        for items in buckets.values():
+            items.sort(key=lambda e: (e["img"].lower() != preferred, e["rel"].lower()))
+
+        def make(label: str, e: dict) -> dict:
+            part = "init_boot_ab" if e["img"].lower().startswith("init_boot") else "boot_ab"
+            return {"label": label, "path": e["path"], "dir": e["dir"], "part": part}
+
+        choices: list[dict] = []
+        for kind, label in (("root", "Root 内核（KernelSU）"), ("noroot", "无 Root 官方内核")):
+            items = buckets[kind]
+            if not items:
+                continue
+            e = items[0]
+            choices.append(make(label if len(items) == 1 else f"{label} - {e['dir']}", e))
+        for e in buckets["unknown"]:
+            choices.append(make(f"内核：{e['rel']}", e))
+        return choices
 
     def _build_custom_ab_cmds(self, images_dir: str, rd: str) -> dict:
-        """第三方自定义 ROM：顶层槽位镜像刷到 <分区>_ab，super/cust 单分区；
-        boot 内核在子目录由用户二选一后刷到 boot_ab（通过 boot_choices 交由 UI 处理）。"""
+        """第三方自定义 ROM：顶层槽位镜像刷到 <分区>_ab，super/system/vendor/cust 单分区；
+        内核由遍历 images/ 子目录找到，用户在有 Root / 无 Root 之间二选一后刷到
+        boot_ab / init_boot_ab（通过 boot_choices 交由 UI 处理）。"""
         files = sorted(os.listdir(images_dir))
         parts: list[str] = []
         for f in files:
@@ -451,7 +538,7 @@ class FastbootClient:
             else:
                 continue
             name = base.removesuffix("_ab")
-            if name in ("super", "cust", "preloader_raw"):
+            if name in ("super", "system", "vendor", "cust", "preloader_raw"):
                 continue
             if name not in parts:
                 parts.append(name)
@@ -475,7 +562,7 @@ class FastbootClient:
                     "raw": f"flash {p}_ab ← {os.path.basename(s)}",
                 }
             )
-        for sp in ("cust", "super"):
+        for sp in ("system", "vendor", "cust", "super"):
             s = src(sp)
             if s:
                 cmds.append(
@@ -497,11 +584,7 @@ class FastbootClient:
                         }
                     )
                 break
-        boot_choices: list[dict] = []
-        for label, sub in (("Root 内核（KernelSU）", "Rootkernel"), ("无 Root 官方内核", "kernel")):
-            b = os.path.join(images_dir, sub, "boot.img")
-            if os.path.isfile(b):
-                boot_choices.append({"label": label, "path": b, "dir": sub})
+        boot_choices = self._build_kernel_choices(images_dir)
         return {
             "commands": cmds,
             "right_device": rd,
