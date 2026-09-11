@@ -4,7 +4,7 @@ set -e
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT"
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 APP_NAME="ADB Tool"
 APP_BUNDLE="$PROJECT/dist/$APP_NAME.app"
 DMG="$PROJECT/dist/$APP_NAME-$VERSION.dmg"
