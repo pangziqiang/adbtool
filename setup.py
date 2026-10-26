@@ -52,7 +52,7 @@ OPTIONS = {
         "CFBundleIdentifier": "com.adbtool.app",
         "CFBundleExecutable": "adbtool",
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.2.1",
+        "CFBundleShortVersionString": "0.2.2",
         "CFBundleVersion": "2",
         "CFBundleIconFile": "adbtool",
         "LSMinimumSystemVersion": "10.15",

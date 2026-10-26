@@ -187,11 +187,25 @@ class MainWindow(QMainWindow):
                     "然后重新打开本软件。",
                 )
                 sys.exit(1)
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            box = QMessageBox(
+                QMessageBox.Icon.Information,
+                "正在安装调试工具",
+                "正在下载 platform-tools（约 16 MB）…",
+                parent=self,
+            )
+            box.setStandardButtons(QMessageBox.StandardButton.NoButton)
+            box.show()
+            QApplication.processEvents()
+
+            def progress(msg: str):
+                box.setText(msg)
+                QApplication.processEvents()
+
             try:
-                path = ensure_adb(lambda m: print(f"[adb] {m}"))
+                path = ensure_adb(progress)
                 return AdbClient(path)
             except AdbError as e:
+                box.close()
                 QMessageBox.critical(
                     self,
                     "下载失败",
@@ -201,7 +215,7 @@ class MainWindow(QMainWindow):
                 )
                 sys.exit(1)
             finally:
-                QApplication.restoreOverrideCursor()
+                box.close()
 
     def _init_local_panel(self):
         last = self.local_panel.saved_path()

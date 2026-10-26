@@ -20,22 +20,31 @@ class FastbootClient:
 
     @staticmethod
     def _find_fastboot() -> str:
+        from .adb_client import binary_runs
+
+        candidates: list[str] = []
         for env in ("ANDROID_FASTBOOT", "FASTBOOT"):
             p = os.environ.get(env)
-            if p and os.path.isfile(p):
-                return p
+            if p:
+                candidates.append(p)
         for env in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
             root = os.environ.get(env)
             if root:
-                cand = os.path.join(root, "platform-tools", "fastboot")
-                if os.path.isfile(cand):
-                    return cand
-        cand = os.path.expanduser("~/Library/Android/sdk/platform-tools/fastboot")
-        if os.path.isfile(cand):
-            return cand
+                candidates.append(os.path.join(root, "platform-tools", "fastboot"))
+        candidates.append(os.path.expanduser("~/Library/Android/sdk/platform-tools/fastboot"))
         which = shutil.which("fastboot")
         if which:
-            return which
+            candidates.append(which)
+        for d in ("/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin"):
+            candidates.append(os.path.join(d, "fastboot"))
+        seen: set[str] = set()
+        for c in candidates:
+            c = os.path.abspath(os.path.expanduser(c))
+            if c in seen:
+                continue
+            seen.add(c)
+            if binary_runs(c, args=("--version",)):
+                return c
         raise FastbootError("未找到 fastboot，请安装 Android SDK platform-tools")
 
     @property

@@ -3,14 +3,17 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 import zipfile
 
-from .adb_client import AdbClient, AdbError
+from .adb_client import AdbClient, AdbError, binary_runs
 
 _OFFICIAL_URL = "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip"
-_FALLBACK_URL = "https://mirrors.huaweicloud.com/android/repository/platform-tools_r23.0.1-macosx.zip"
+_MIRROR_URL = "https://mirrors.cloud.tencent.com/AndroidSDK/platform-tools-latest-darwin.zip"
+_URLS = (_OFFICIAL_URL, _MIRROR_URL)
 _SDK_DIR = os.path.expanduser("~/Library/Android/sdk")
+_DOWNLOAD_TIMEOUT = 150  # 单个下载源的总时长上限（秒）
 
 
 def ensure_adb(progress=None) -> str:
@@ -23,16 +26,18 @@ def ensure_adb(progress=None) -> str:
 def download_adb(progress=None) -> str:
     os.makedirs(_SDK_DIR, exist_ok=True)
     adb = os.path.join(_SDK_DIR, "platform-tools", "adb")
-    if os.path.isfile(adb):
+    # 必须真实可执行：旧的 i386 版本在 64 位 macOS 上无法运行
+    if binary_runs(adb):
         return adb
     zip_path = os.path.join(_SDK_DIR, "platform-tools.zip")
-    for url in (_OFFICIAL_URL, _FALLBACK_URL):
+    errors: list[str] = []
+    for url in _URLS:
+        host = url.split("/")[2]
         try:
             if progress:
-                progress(f"正在下载 adb（{url.split('/')[2]}）...")
-            _download(url, zip_path)
+                progress(f"正在下载 platform-tools（{host}）...")
+            _download(url, zip_path, progress=progress)
             _safe_extract(zip_path, _SDK_DIR)
-            os.remove(zip_path)
             for tool in ("adb", "fastboot"):
                 p = os.path.join(_SDK_DIR, "platform-tools", tool)
                 if os.path.isfile(p):
@@ -46,21 +51,47 @@ def download_adb(progress=None) -> str:
                 )
             except OSError:
                 pass
+            if not binary_runs(adb):
+                raise RuntimeError("下载的 adb 无法在本机运行（可能是架构不匹配）")
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
             return adb
         except Exception as e:
+            errors.append(f"{host}: {e}")
             if progress:
-                progress(f"下载失败（{url.split('/')[2]}）：{e}")
-    raise AdbError("自动下载 adb 失败，请手动安装 platform-tools")
+                progress(f"下载失败（{host}）：{e}")
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+    raise AdbError("自动下载 adb 失败：" + ("；".join(errors) or "未知错误") + "。请手动安装 platform-tools")
 
 
-def _download(url: str, dest: str) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "adbtool/0.1"})
-    with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as f:
+def _download(url: str, dest: str, progress=None) -> None:
+    req = urllib.request.Request(url, headers={"User-Agent": "adbtool/0.2"})
+    deadline = time.monotonic() + _DOWNLOAD_TIMEOUT
+    downloaded = 0
+    reported = 0
+    with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as f:
+        total = int(resp.headers.get("Content-Length") or 0)
         while True:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"下载超时（{_DOWNLOAD_TIMEOUT} 秒）")
             chunk = resp.read(65536)
             if not chunk:
                 break
             f.write(chunk)
+            downloaded += len(chunk)
+            if progress and downloaded - reported >= 2 * 1024 * 1024:
+                reported = downloaded
+                if total:
+                    progress(f"已下载 {downloaded / 1048576:.1f}/{total / 1048576:.1f} MB")
+                else:
+                    progress(f"已下载 {downloaded / 1048576:.1f} MB")
+    if downloaded == 0:
+        raise RuntimeError("下载内容为空")
 
 
 def _safe_extract(zip_path: str, dest: str) -> None:

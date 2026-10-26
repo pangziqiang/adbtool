@@ -16,6 +16,22 @@ class AdbError(Exception):
     pass
 
 
+def binary_runs(path: str, args: tuple[str, ...] = ("version",), timeout: int = 8) -> bool:
+    """判断二进制是否真实可执行：可过滤架构不匹配的旧版（如 i386 adb）。"""
+    if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
+        return False
+    try:
+        res = subprocess.run(
+            [path, *args],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        return res.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 @dataclass
 class FileEntry:
     name: str
@@ -51,22 +67,30 @@ class AdbClient:
 
     @staticmethod
     def _find_adb() -> str:
+        candidates: list[str] = []
         for env in ("ANDROID_ADB", "ADB"):
             p = os.environ.get(env)
-            if p and os.path.isfile(p):
-                return p
+            if p:
+                candidates.append(p)
         for env in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
             root = os.environ.get(env)
             if root:
-                cand = os.path.join(root, "platform-tools", "adb")
-                if os.path.isfile(cand):
-                    return cand
-        cand = os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
-        if os.path.isfile(cand):
-            return cand
+                candidates.append(os.path.join(root, "platform-tools", "adb"))
+        candidates.append(os.path.expanduser("~/Library/Android/sdk/platform-tools/adb"))
         which = shutil.which("adb")
         if which:
-            return which
+            candidates.append(which)
+        # Finder 启动的 App 只有最小 PATH，补上常见安装目录
+        for d in ("/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin"):
+            candidates.append(os.path.join(d, "adb"))
+        seen: set[str] = set()
+        for c in candidates:
+            c = os.path.abspath(os.path.expanduser(c))
+            if c in seen:
+                continue
+            seen.add(c)
+            if binary_runs(c):
+                return c
         raise AdbError("未找到 adb，请安装 Android SDK platform-tools")
 
     @property
